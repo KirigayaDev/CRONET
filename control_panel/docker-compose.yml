@@ -4,8 +4,7 @@ services:
             context: ./services/database_migrations
             dockerfile: Dockerfile
         restart: on-failure
-        command: "alembic revision --autogenerate -m \" \""
-        #command: "alembic revision -m \"add_uuid_extension\""
+        #command: "alembic revision --autogenerate -m \"name\""
         environment:
             POSTGRES_USER: ${POSTGRES_USER}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
