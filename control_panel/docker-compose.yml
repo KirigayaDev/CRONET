@@ -4,7 +4,7 @@ services:
             context: ./services/database_migrations
             dockerfile: Dockerfile
         restart: on-failure
-        #command: "alembic revision --autogenerate -m \"name\""
+        command: "alembic revision --autogenerate -m \"add_user_table\""
         environment:
             POSTGRES_USER: ${POSTGRES_USER}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

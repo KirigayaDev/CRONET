@@ -8,4 +8,4 @@ class _DatabaseSettings(BaseSettings):
     database: str = Field(..., alias="POSTGRES_DB", alias_priority=True)
 
 
-database_settings = _DatabaseSettings()
+database_settings = _DatabaseSettings() # type: ignore
