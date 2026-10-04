@@ -136,3 +136,19 @@ services:
             timeout: 5s
             retries: 3
             start_period: 10s
+
+    qdrant:
+        image: qdrant/qdrant:latest
+        restart: unless-stopped
+        ports:
+            - "6333:6333" # REST API (и Web-UI Дашборд)
+            - "6334:6334" # gRPC интерфейс (рекомендуется для кода)
+        environment:
+            RUN_MODE: production
+            QDRANT__SERVICE__API_KEY: ${QDRANT_SERVICE_API_KEY}
+        volumes:
+            - ./qdrant_storage:/qdrant/storage
+        ulimits:
+            nofile:
+                soft: 65535
+                hard: 65535

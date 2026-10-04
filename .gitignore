@@ -405,6 +405,7 @@ ollama_data/
 nats_data/
 ch_data/
 ch_logs/
+qdrant_storage/
 
 *.pem
 
