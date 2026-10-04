@@ -402,6 +402,9 @@ minio_data/
 redis_data/
 pgadmin_data/
 ollama_data/
+nats_data/
+ch_data/
+ch_logs/
 
 *.pem
 

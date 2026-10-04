@@ -109,3 +109,30 @@ services:
             retries: 3
             start_interval: 10s
             start_period: 0s
+
+
+    clickhouse:
+        image: clickhouse/clickhouse-server:25.8-distroless
+        restart: unless-stopped
+        ports:
+            - "8123:8123" # HTTP интерфейс (для веб-интерфейсов, дашбордов, DBeaver)
+            - "9000:9000" # Native протокол (для clickhouse-client и некоторых драйверов)
+
+        volumes:
+            - ./ch_data:/var/lib/clickhouse
+            - ./ch_logs:/var/log/clickhouse
+
+        environment:
+              CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+
+        healthcheck:
+            test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
