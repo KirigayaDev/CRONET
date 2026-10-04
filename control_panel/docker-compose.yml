@@ -58,8 +58,6 @@ services:
             - "6379:6379"
         volumes:
             - ./redis_data:/data
-            - ./configurations/custom_configs/redis:/config/
-
         command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes" ]
         healthcheck:
             test: [ "CMD", "redis-cli", "-u", "redis://:${REDIS_PASSWORD}@localhost:6379", "ping" ]
@@ -85,6 +83,27 @@ services:
 
         healthcheck:
             test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+            interval: 10s
+            timeout: 3s
+            retries: 3
+            start_interval: 10s
+            start_period: 0s
+
+    nats:
+        image: nats:2.15-alpine
+        restart: unless-stopped
+        ports:
+            - "4222:4222"
+            - "8222:8222"
+        environment:
+            NATS_SERVER_TOKEN: ${NATS_SERVER_TOKEN}
+        volumes:
+            - ./nats_data:/data/jetstream
+            - ./configurations/nats/nats.conf:/etc/nats/nats.conf:ro
+        command: ["-c", "/etc/nats/nats.conf"]
+
+        healthcheck:
+            test: ["CMD", "nats-server", "-status", "-port", "8222"]
             interval: 10s
             timeout: 3s
             retries: 3
