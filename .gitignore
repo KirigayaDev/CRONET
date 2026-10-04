@@ -403,7 +403,6 @@ redis_data/
 pgadmin_data/
 ollama_data/
 
-crypt_keys/jwt_keys/private_key.pem
-crypt_keys/jwt_keys/public_key.pem
+*.pem
 
 nginx/media/*.png

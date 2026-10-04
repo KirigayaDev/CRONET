@@ -1,0 +1,10 @@
+fastapi[standard]==0.120.2
+pydantic[email]==2.12.3
+uvicorn==0.38.0
+pydantic-settings==2.11.0
+SQLAlchemy==2.0.44
+asyncpg==0.30.0
+orjson==3.11.4
+argon2-cffi==25.1.0
+pyjwt[crypto]==2.10.1
+redis==7.1.0
