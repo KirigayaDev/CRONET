@@ -2,7 +2,7 @@ fastapi[standard]==0.142.2
 pydantic[email]==2.13.5
 uvicorn==0.54.0
 pydantic-settings==2.15.0
-SQLAlchemy==2.1.4
+SQLAlchemy[asyncio]==2.1.4
 asyncpg==0.32.0
 orjson==3.13.0
 argon2-cffi==25.1.0

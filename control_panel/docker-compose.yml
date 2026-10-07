@@ -38,7 +38,7 @@ services:
             context: ./services/database_migrations
             dockerfile: Dockerfile
         restart: on-failure
-        #command: "alembic revision --autogenerate -m \"add_user_table\""
+        #command: "alembic revision --autogenerate -m \"change username limit\""
         environment:
             POSTGRES_USER: ${POSTGRES_USER}
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

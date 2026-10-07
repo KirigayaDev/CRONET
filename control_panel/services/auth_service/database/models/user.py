@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, TIMESTAMP, func, text
+from sqlalchemy import Column, String, TIMESTAMP, func, text, Boolean
 
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -13,7 +13,9 @@ class User(Base):
     username = Column(String(32), unique=True, index=True, nullable=False, name='username')
     email = Column(String(254), unique=True, index=True, nullable=False, name='email')
     password_hash = Column(String, nullable=False, name='password_hash')
-    created_at = Column(TIMESTAMP, server_default=func.nowtime(), name='created_at')
+    created_at = Column(TIMESTAMP, server_default=func.now(), name='created_at')
+    display_name = Column(String(32), nullable=False, name="display_name")
+    is_admin = Column(Boolean(), server_default="0", name="is_admin", nullable=False)
+    is_super_admin = Column(Boolean(), server_default="0", name="is_super_admin", nullable=False)
     token_version_uuid = Column(UUID(as_uuid=True), nullable=False, name='token_version_uuid',
                                 server_default=text('uuid_generate_v4()'))
-    display_name = Column(String(32), nullable=False, name="display_name")
