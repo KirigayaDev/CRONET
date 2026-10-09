@@ -1,7 +1,7 @@
 # D1: initial CMDB schema
 
 Revision `8b6e2f4a9c10` extends `72ca3097da29`. It uses the existing
-Alembic runner and changes no existing migration, model, configuration,
+Alembic runner and changes no pre-D1 migration, model, shared configuration,
 or auth_service file. This step adds the database foundation; the Rust API
 and CSV confirmation workflow follow separately.
 
@@ -80,11 +80,11 @@ Foreign keys use PostgreSQL's default NO ACTION; no destructive cascades are add
 
 | Table | Main constraints and behavior |
 | --- | --- |
-| `sites` | Required name; optional description; created_at/updated_at. Site names are not globally unique. |
-| `rooms` | Required FK site_id; UNIQUE(site_id, name); timestamps. |
-| `racks` | Required FK room_id; UNIQUE(room_id, name); height_u > 0; cannot shrink past any placed device. |
-| `devices` | Nullable rack_id FK; placement requires start_unit and height_u; start_unit/height_u positive when present; lifecycle active/maintenance/decommissioned; rack bounds checked on placement/update; active U ranges cannot overlap in one rack. |
-| `interfaces` | Required device_id FK; if_index > 0 when present; UNIQUE(device_id, if_index) permits multiple NULLs; native MACADDR, without global uniqueness. |
+| `sites` | Nonblank name, globally unique after case/whitespace normalization; optional description; created_at/updated_at. |
+| `rooms` | Required FK site_id; nonblank name, logically unique within site_id; timestamps. |
+| `racks` | Required FK room_id; nonblank name, logically unique within room_id; height_u > 0; cannot shrink past any placed device. |
+| `devices` | Nullable rack_id FK; placement requires start_unit and height_u; start_unit/height_u positive when present; lifecycle active/maintenance/decommissioned; rack bounds checked on placement/update; all placed U ranges cannot overlap in one rack. |
+| `interfaces` | Required device_id FK and nonblank name; if_index > 0 when present; UNIQUE(device_id, if_index) permits multiple NULLs; native MACADDR, without global uniqueness. |
 | `ip_addresses` | Required interface_id FK and INET address; UNIQUE(interface_id, address); management flag defaults false. IPv4 and IPv6 supported. |
 | `field_overrides` | UNIQUE(entity_type, entity_id, field_name); six canonical entity types; nonblank field_name; locked_by FK users.uuid; locked_at; no duplicated value. |
 | `audit_events` | Actor/source/action/entity metadata; before/after JSONB; optional request_id and batch FK; detected_at and optional changed_at; UPDATE, DELETE, TRUNCATE rejected. |
@@ -96,16 +96,41 @@ indexes or the leading columns of compound unique constraints. Audit has indexes
 for entity/time, request_id, and import_batch_id. Four CMDB trigger functions and
 nine triggers are created; downgrade removes them with the CMDB tables.
 
+## Logical name identity
+
+PostgreSQL UNIQUE expression indexes compare:
+
+```sql
+lower(btrim(regexp_replace(name, '[[:space:]]+', ' ', 'g')))
+```
+
+The expression lowercases names under the database locale, collapses runs of
+POSIX whitespace to one space, and strips outer spaces. Thus `Room A`, `room a`,
+`  Room A  `, and `Room  A` have the same logical identity. Tabs/newlines are
+also recognized as whitespace. The stored display name is unchanged; no second
+normalized-name column or additional extension is needed.
+
+The site index is global; room and rack indexes include their parent site_id
+and room_id respectively. Equivalent room/rack names in different parents remain
+valid. Both INSERT and UPDATE, including concurrent writes, are constrained by
+the database. The old raw-name unique constraints are replaced with these indexes.
+Sites, rooms, racks, and interfaces also have `CHECK (name ~ '[^[:space:]]')`,
+requiring at least one non-whitespace character. Interfaces do not acquire
+an unrequested uniqueness rule.
+
 ## Placement and 3NF decisions
 
 - Location is `device -> rack -> room -> site`. Devices carry no site_id/room_id,
   IP, or MAC. Racks carry no site_id. Rack units are ranges, not per-U rows.
 - An unplaced device has NULL rack_id/start_unit. It may still have a known,
   positive physical height_u. Positioned devices use one-based U numbering.
-- An active device occupies `[start_unit, start_unit + height_u)` in its rack.
-  Adjacent devices are allowed. Maintenance/decommissioned devices can overlap
-  under the requested active-only rule, but all placed devices must fit the rack.
-- A GiST exclusion constraint enforces active overlap under concurrency.
+- Every placed device occupies `[start_unit, start_unit + height_u)` in its rack.
+  Adjacent devices are allowed. Active, maintenance, and decommissioned devices
+  all block their physical U range while placement remains set. Lifecycle changes
+  never release units. Clear both rack_id and start_unit to remove placement;
+  a known physical height_u may remain. All placed devices must fit the rack.
+- GiST exclusion `ex_devices_rack_units` has predicate `rack_id IS NOT NULL`
+  and enforces physical occupancy under concurrency, independent of lifecycle.
   PostgreSQL `btree_gist` provides the UUID equality operator class.
 - Bounds cannot be a cross-table CHECK. Placement makes a no-op MVCC write to
   the target rack and validates its height; rack resize validates existing devices.
@@ -121,7 +146,8 @@ nine triggers are created; downgrade removes them with the CMDB tables.
 
 References: [PostgreSQL constraints](https://www.postgresql.org/docs/18/ddl-constraints.html),
 [btree_gist](https://www.postgresql.org/docs/18/btree-gist.html),
-[transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html).
+[transaction isolation](https://www.postgresql.org/docs/18/transaction-iso.html),
+[expression indexes](https://www.postgresql.org/docs/18/indexes-expressional.html).
 
 ## Reproducible checks
 
@@ -133,11 +159,11 @@ Trust authentication is confined to this isolated test network; it is not a
 deployment configuration. It does not load `control_panel/.env`.
 
 ```sh
-docker compose -p cronet-cmdb-d1-test-01a12211 -f tests/compose.cmdb-test.yml config --quiet
-docker compose -p cronet-cmdb-d1-test-01a12211 -f tests/compose.cmdb-test.yml build database_migrations
-docker compose -p cronet-cmdb-d1-test-01a12211 -f tests/compose.cmdb-test.yml up -d --wait postgres
-docker compose -p cronet-cmdb-d1-test-01a12211 -f tests/compose.cmdb-test.yml run --rm --no-deps database_migrations python -B -m unittest discover -s tests -p test_cmdb_migration.py -v
-docker compose -p cronet-cmdb-d1-test-01a12211 -f tests/compose.cmdb-test.yml down
+docker compose -p cronet-cmdb-d1-fix-01a12211 -f tests/compose.cmdb-test.yml config --quiet
+docker compose -p cronet-cmdb-d1-fix-01a12211 -f tests/compose.cmdb-test.yml build database_migrations
+docker compose -p cronet-cmdb-d1-fix-01a12211 -f tests/compose.cmdb-test.yml up -d --wait postgres
+docker compose -p cronet-cmdb-d1-fix-01a12211 -f tests/compose.cmdb-test.yml run --rm --no-deps database_migrations python -B -m unittest discover -s tests -p test_cmdb_migration.py -v
+docker compose -p cronet-cmdb-d1-fix-01a12211 -f tests/compose.cmdb-test.yml down
 ```
 
 The suite refuses a different database name and refuses a nonempty initial DB.
@@ -146,31 +172,37 @@ the user schema/data, and performs downgrade/upgrade only in the ephemeral DB.
 Concurrency tests wait for an observed PostgreSQL lock rather than assuming timing.
 Python bytecode writing is disabled in test commands.
 
-Validation on 2026-10-09: 17 integration tests passed in 6.952 seconds.
+Validation on 2026-10-09: 27 integration tests passed in 6.728 seconds.
+The original 17 scenarios remain, with overlap/reactivation expectations updated
+for lifecycle-independent placement. Ten added scenarios check global site
+duplicates, case/outer/internal whitespace duplicates at each location level,
+blank names, rename constraints, unchanged display names, maintenance/decommissioned
+occupancy, explicit placement removal, and concurrent logical site-name duplicates.
 Checks cover migration head/history, table/type/3NF inspection, hierarchy/FKs,
-positive dimensions, placement/resize, active overlap/reactivation/adjacency,
+positive dimensions, placement/resize, physical overlap/reactivation/adjacency,
 per-interface IP uniqueness, IPv4/IPv6/MAC validation, overrides, staging JSON
 and statuses, audit immutability and transaction rollback, update timestamps,
-four competing-transaction scenarios, two stronger isolation levels, and
+five competing-transaction scenarios, two stronger isolation levels, and
 downgrade/upgrade schema restoration with the existing user's data unchanged.
 Local Python AST parsing and Git whitespace checks also passed.
 
-## Delivery state
+## Mentor review correction
 
-Four new D1 files are staged for review: this report, the new migration,
-the isolated test Compose, and the integration test suite. All existing
-tracked files are unchanged. The test project's containers and network
-were removed after checking the table list, migration head, and extensions.
-No new host database data, .env, IDE files, or bytecode files were created.
+The initial schema was committed as `276a24b0e58612dab5ca74d5e1e8df10eba35f46`.
+The authorized correction changes only our D1 migration, integration tests, and
+this document. Shared code and the test Compose are unchanged. The revision ID
+and migration chain remain unchanged; the amended initial migration is intended
+for the predeployment schema stage.
 
-Commit and push are deferred at the user's request until the mentor confirms
-the change. No commit was created and no branch was pushed. An earlier commit
-attempt failed because Git had no author identity; the user subsequently
-supplied an identity for eventual command-scoped use. Git configuration was
-not changed and the identity is not stored in this report.
+Important: Alembic does not re-run an already applied revision when its file
+changes. A database already stamped at `8b6e2f4a9c10` would need a separately
+authorized forward migration, including review of existing duplicate names and
+overlapping placements. Do not downgrade a populated database to apply this fix.
+The current correction is checked only in a disposable, initially empty test DB;
+no migration or data cleanup is run against the user's database.
 
-Planned commit message: `feat(cmdb): add initial CMDB database schema`.
-Planned push target after confirmation: `origin/feature/d1-cmdb-api`.
+Corrective commit message: `fix(cmdb): tighten schema integrity constraints`.
+Push target: `origin/feature/d1-cmdb-api`.
 
 ## Next stage and open policies
 
@@ -185,9 +217,9 @@ Planned push target after confirmation: `origin/feature/d1-cmdb-api`.
   Confirmation must lock the batch/staging rows, reject any validation errors,
   explicitly accept warnings, and commit the entire canonical import plus audit
   in one transaction. Status/JSON checks are not the all-or-nothing import API.
-- Decide case normalization for names/hostname, actor/source/action vocabulary,
-  import retention, and permissions before exposing writes. Existing username
-  and CMDB name comparisons remain case-sensitive.
+- Use the same logical-name expression in location-name lookups. Decide hostname
+  normalization, actor/source/action vocabulary, import retention, and permissions
+  before exposing writes. The existing username policy remains unchanged.
 - Handle SQLSTATE 40001/40P01 with bounded transaction retries. Per-rack write
   serialization trades throughput for correct bounds at all supported isolation
   levels; the no-op writes also create MVCC versions/WAL. Bulk writers should

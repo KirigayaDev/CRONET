@@ -17,6 +17,9 @@ down_revision: Union[str, Sequence[str], None] = '72ca3097da29'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+# Keep the display name; uniqueness ignores case and whitespace runs.
+_NORMALIZED_NAME = "lower(btrim(regexp_replace(name, '[[:space:]]+', ' ', 'g')))"
+
 
 def _id_column() -> sa.Column:
     return sa.Column('id', postgresql.UUID(as_uuid=True),
@@ -43,7 +46,10 @@ def upgrade() -> None:
         sa.Column('description', sa.Text(), nullable=True),
         *_timestamps(),
         sa.PrimaryKeyConstraint('id', name='pk_sites'),
+        sa.CheckConstraint("name ~ '[^[:space:]]'", name='ck_sites_name_not_blank'),
     )
+    op.create_index('uq_sites_name_normalized', 'sites',
+                    [sa.text(_NORMALIZED_NAME)], unique=True)
     op.create_table(
         'rooms', _id_column(),
         sa.Column('site_id', postgresql.UUID(as_uuid=True), nullable=False),
@@ -52,8 +58,10 @@ def upgrade() -> None:
         *_timestamps(),
         sa.PrimaryKeyConstraint('id', name='pk_rooms'),
         sa.ForeignKeyConstraint(['site_id'], ['sites.id'], name='fk_rooms_site_id'),
-        sa.UniqueConstraint('site_id', 'name', name='uq_rooms_site_id_name'),
+        sa.CheckConstraint("name ~ '[^[:space:]]'", name='ck_rooms_name_not_blank'),
     )
+    op.create_index('uq_rooms_site_id_name_normalized', 'rooms',
+                    ['site_id', sa.text(_NORMALIZED_NAME)], unique=True)
     op.create_table(
         'racks', _id_column(),
         sa.Column('room_id', postgresql.UUID(as_uuid=True), nullable=False),
@@ -63,9 +71,11 @@ def upgrade() -> None:
         *_timestamps(),
         sa.PrimaryKeyConstraint('id', name='pk_racks'),
         sa.ForeignKeyConstraint(['room_id'], ['rooms.id'], name='fk_racks_room_id'),
-        sa.UniqueConstraint('room_id', 'name', name='uq_racks_room_id_name'),
+        sa.CheckConstraint("name ~ '[^[:space:]]'", name='ck_racks_name_not_blank'),
         sa.CheckConstraint('height_u > 0', name='ck_racks_height_u_positive'),
     )
+    op.create_index('uq_racks_room_id_name_normalized', 'racks',
+                    ['room_id', sa.text(_NORMALIZED_NAME)], unique=True)
     op.create_table(
         'devices', _id_column(),
         sa.Column('rack_id', postgresql.UUID(as_uuid=True), nullable=True),
@@ -96,12 +106,12 @@ def upgrade() -> None:
     op.create_index('ix_devices_serial', 'devices', ['serial'])
     # Half-open ranges allow adjacent devices. Bigint avoids integer overflow.
     op.execute("""
-        ALTER TABLE devices ADD CONSTRAINT ex_devices_active_rack_units
+        ALTER TABLE devices ADD CONSTRAINT ex_devices_rack_units
         EXCLUDE USING gist (
             rack_id WITH =,
             int8range(start_unit::bigint,
                       start_unit::bigint + height_u::bigint, '[)') WITH &&
-        ) WHERE (lifecycle_status = 'active' AND rack_id IS NOT NULL)
+        ) WHERE (rack_id IS NOT NULL)
     """)
     op.create_table(
         'interfaces', _id_column(),
@@ -115,6 +125,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id', name='pk_interfaces'),
         sa.ForeignKeyConstraint(['device_id'], ['devices.id'],
                                 name='fk_interfaces_device_id'),
+        sa.CheckConstraint("name ~ '[^[:space:]]'", name='ck_interfaces_name_not_blank'),
         sa.CheckConstraint('if_index > 0', name='ck_interfaces_if_index_positive'),
         # PostgreSQL's default NULL-distinct semantics allow unknown if_index.
         sa.UniqueConstraint('device_id', 'if_index',

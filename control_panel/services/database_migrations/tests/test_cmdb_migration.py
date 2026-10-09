@@ -135,7 +135,8 @@ class CmdbMigrationTests(unittest.TestCase):
 
     def location(self, height=42):
         site = scalar(self.connection,
-                      "INSERT INTO sites (name) VALUES ('test site') RETURNING id")
+                      'INSERT INTO sites (name) VALUES (%s) RETURNING id',
+                      (f'test site {uuid4()}',))
         room = scalar(self.connection,
                       "INSERT INTO rooms (site_id, name) VALUES (%s, 'test room') RETURNING id",
                       (site,))
@@ -214,6 +215,85 @@ class CmdbMigrationTests(unittest.TestCase):
         self.interface(device)
         self.reject('DELETE FROM devices WHERE id = %s', (device,), '23503')
 
+    def test_site_names_are_logically_unique(self):
+        name = 'Site A'
+        site = scalar(self.connection,
+                      'INSERT INTO sites (name) VALUES (%s) RETURNING id', (name,))
+        for duplicate in (name, 'site a', 'SITE A', '  Site A  ', '\tSite A\r\n',
+                          'Site  A', 'Site\tA'):
+            with self.subTest(duplicate=duplicate):
+                self.reject('INSERT INTO sites (name) VALUES (%s)', (duplicate,), '23505')
+        self.assertEqual(scalar(self.connection, 'SELECT name FROM sites WHERE id = %s',
+                                (site,)), name)
+
+    def test_room_names_are_logically_unique_within_site(self):
+        site, _, _ = self.location()
+        for duplicate in ('test room', 'TEST ROOM', '  test room  ', '\ttest room\n',
+                          'test  room', 'test\troom'):
+            with self.subTest(duplicate=duplicate):
+                self.reject('INSERT INTO rooms (site_id, name) VALUES (%s, %s)',
+                            (site, duplicate), '23505')
+        other_site = scalar(self.connection,
+                            "INSERT INTO sites (name) VALUES ('other site') RETURNING id")
+        scalar(self.connection, 'INSERT INTO rooms (site_id, name) VALUES (%s, %s) RETURNING id',
+               (other_site, ' TEST ROOM '))
+
+    def test_rack_names_are_logically_unique_within_room(self):
+        site, room, _ = self.location()
+        for duplicate in ('test rack', 'TEST RACK', '  test rack  ', '\ttest rack\n',
+                          'test  rack', 'test\track'):
+            with self.subTest(duplicate=duplicate):
+                self.reject('INSERT INTO racks (room_id, name, height_u) VALUES (%s, %s, 42)',
+                            (room, duplicate), '23505')
+        other_room = scalar(self.connection, """
+            INSERT INTO rooms (site_id, name) VALUES (%s, 'other room') RETURNING id
+        """, (site,))
+        scalar(self.connection, """
+            INSERT INTO racks (room_id, name, height_u) VALUES (%s, %s, 42) RETURNING id
+        """, (other_room, ' TEST RACK '))
+
+    def test_required_names_reject_empty_and_whitespace(self):
+        site, room, _ = self.location()
+        device = self.device()
+        statements = (
+            ('sites', 'INSERT INTO sites (name) VALUES (%s)', ()),
+            ('rooms', 'INSERT INTO rooms (site_id, name) VALUES (%s, %s)', (site,)),
+            ('racks', 'INSERT INTO racks (room_id, height_u, name) VALUES (%s, 42, %s)', (room,)),
+            ('interfaces', 'INSERT INTO interfaces (device_id, name) VALUES (%s, %s)', (device,)),
+        )
+        for table, sql, parameters in statements:
+            for blank in ('', ' ', '   ', '\t', '\r\n', ' \t\n\v\f\r '):
+                with self.subTest(table=table, blank=blank):
+                    self.reject(sql, (*parameters, blank))
+
+    def test_name_updates_enforce_uniqueness_and_nonblank(self):
+        site, room, rack = self.location()
+        other_site = scalar(self.connection,
+                            "INSERT INTO sites (name) VALUES ('other site') RETURNING id")
+        site_name = scalar(self.connection, 'SELECT name FROM sites WHERE id = %s', (site,))
+        self.reject('UPDATE sites SET name = %s WHERE id = %s',
+                    (f'  {site_name.upper()}  ', other_site), '23505')
+        other_room = scalar(self.connection, """
+            INSERT INTO rooms (site_id, name) VALUES (%s, 'other room') RETURNING id
+        """, (site,))
+        self.reject("UPDATE rooms SET name = ' TEST  ROOM ' WHERE id = %s", (other_room,), '23505')
+        other_rack = scalar(self.connection, """
+            INSERT INTO racks (room_id, name, height_u)
+            VALUES (%s, 'other rack', 42) RETURNING id
+        """, (room,))
+        self.reject("UPDATE racks SET name = ' TEST  RACK ' WHERE id = %s", (other_rack,), '23505')
+        interface = self.interface(self.device())
+        for table, entity in (('sites', site), ('rooms', room), ('racks', rack),
+                              ('interfaces', interface)):
+            with self.subTest(table=table):
+                self.reject(f'UPDATE {table} SET name = %s WHERE id = %s', ('\t \n', entity))
+
+    def test_normalization_preserves_original_display_name(self):
+        name = '  Display\t  Name  '
+        site = scalar(self.connection, 'INSERT INTO sites (name) VALUES (%s) RETURNING id', (name,))
+        self.assertEqual(scalar(self.connection, 'SELECT name FROM sites WHERE id = %s', (site,)), name)
+        self.reject("INSERT INTO sites (name) VALUES ('display name')", code='23505')
+
     def test_placement_completeness_positive_dimensions_and_lifecycle(self):
         _, room, rack = self.location()
         self.device()
@@ -248,14 +328,59 @@ class CmdbMigrationTests(unittest.TestCase):
         self.device(rack, 3, 1)
         self.reject('INSERT INTO devices (rack_id, start_unit, height_u) VALUES (%s,2,2)',
                     (rack,), '23P01')
-        maintenance = self.device(rack, 1, 2, 'maintenance')
-        self.device(rack, 1, 2, 'decommissioned')
-        self.reject("UPDATE devices SET lifecycle_status = 'active' WHERE id = %s",
-                    (maintenance,), '23P01')
+        maintenance = self.device(rack, 4, 2, 'maintenance')
+        self.device(rack, 6, 2, 'decommissioned')
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE devices SET lifecycle_status = 'active' WHERE id = %s",
+                           (maintenance,))
         _, _, other_rack = self.location()
         self.device(other_rack, 1, 2)
         with self.connection.cursor() as cursor:
             cursor.execute("INSERT INTO devices (hostname, serial) VALUES ('same', 'same'), ('same', 'same')")
+
+    def test_maintenance_placement_blocks_every_lifecycle(self):
+        _, _, rack = self.location()
+        device = self.device(rack, 1, 2)
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE devices SET lifecycle_status = 'maintenance' WHERE id = %s", (device,))
+        for status in ('active', 'maintenance', 'decommissioned'):
+            with self.subTest(status=status):
+                self.reject("""
+                    INSERT INTO devices (rack_id, start_unit, height_u, lifecycle_status)
+                    VALUES (%s, 2, 2, %s)
+                """, (rack, status), '23P01')
+
+    def test_decommissioned_placement_blocks_every_lifecycle(self):
+        _, _, rack = self.location()
+        device = self.device(rack, 1, 2, 'maintenance')
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE devices SET lifecycle_status = 'decommissioned' WHERE id = %s", (device,))
+        for status in ('active', 'maintenance', 'decommissioned'):
+            with self.subTest(status=status):
+                self.reject("""
+                    INSERT INTO devices (rack_id, start_unit, height_u, lifecycle_status)
+                    VALUES (%s, 2, 2, %s)
+                """, (rack, status), '23P01')
+
+    def test_removing_placement_releases_units(self):
+        for status in ('active', 'maintenance', 'decommissioned'):
+            with self.subTest(status=status):
+                _, _, rack = self.location()
+                device = self.device(rack, 1, 2, status)
+                self.reject('INSERT INTO devices (rack_id, start_unit, height_u) VALUES (%s,1,2)',
+                            (rack,), '23P01')
+                self.reject('UPDATE devices SET rack_id = NULL WHERE id = %s', (device,))
+                with self.connection.cursor() as cursor:
+                    cursor.execute('UPDATE devices SET rack_id = NULL, start_unit = NULL WHERE id = %s',
+                                   (device,))
+                self.device(rack, 1, 2)
+                self.assertEqual(scalar(self.connection,
+                                       'SELECT lifecycle_status FROM devices WHERE id = %s', (device,)), status)
+                self.assertTrue(scalar(self.connection,
+                                       'SELECT rack_id IS NULL AND start_unit IS NULL FROM devices WHERE id = %s',
+                                       (device,)))
+                self.reject('UPDATE devices SET rack_id = %s, start_unit = 1 WHERE id = %s',
+                            (rack, device), '23P01')
 
     def test_interfaces_and_network_identity_are_locally_unique(self):
         first_device, second_device = self.device(), self.device()
@@ -393,11 +518,21 @@ class CmdbMigrationTests(unittest.TestCase):
             worker.join(timeout=10)
 
     def test_concurrent_active_overlap_is_rejected_after_commit(self):
-        _, _, rack = self.location()
-        self.connection.commit()
-        self.device(rack, 1, 2)
-        self.blocked_write('INSERT INTO devices (rack_id, start_unit, height_u) VALUES (%s,2,2)',
-                           (rack,), self.connection.commit, '23P01')
+        for status in ('active', 'maintenance', 'decommissioned'):
+            with self.subTest(status=status):
+                _, _, rack = self.location()
+                self.connection.commit()
+                self.device(rack, 1, 2, status)
+                self.blocked_write("""
+                    INSERT INTO devices (rack_id, start_unit, height_u, lifecycle_status)
+                    VALUES (%s, 2, 2, 'maintenance')
+                """, (rack,), self.connection.commit, '23P01')
+
+    def test_concurrent_normalized_site_name_is_rejected_after_commit(self):
+        name = f'concurrent site {uuid4()}'
+        scalar(self.connection, 'INSERT INTO sites (name) VALUES (%s) RETURNING id', (name,))
+        self.blocked_write('INSERT INTO sites (name) VALUES (%s)',
+                           (f'  {name.upper()}  ',), self.connection.commit, '23505')
 
     def test_concurrent_placement_succeeds_after_competitor_rollback(self):
         _, _, rack = self.location()
