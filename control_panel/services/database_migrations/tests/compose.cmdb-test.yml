@@ -1,0 +1,28 @@
+# An independent project with ephemeral storage; never reads control_panel/.env.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_DB: cronet_cmdb_test_schema
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cmdb_test", "-d", "cronet_cmdb_test_schema"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  database_migrations:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_PASSWORD: ""
+      POSTGRES_DB: cronet_cmdb_test_schema
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
