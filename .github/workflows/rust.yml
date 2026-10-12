@@ -62,7 +62,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Start test environment
-        run: docker compose -f testenv/docker-compose.yml up -d
+        run: docker compose -f testenv_snmp/docker-compose.yml up -d
       - name: Wait for snmpsim
         run: sleep 25
       - name: Run e2e
