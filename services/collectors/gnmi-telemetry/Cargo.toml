@@ -1,0 +1,28 @@
+[package]
+name = "gnmi-telemetry"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = "0.46.0"
+async-trait = "0.1.92"
+bus = { version = "0.1.0", path = "../../../libs/bus" }
+contracts = { version = "0.1.0", path = "../../../libs/contracts" }
+creds = { version = "0.1.0", path = "../../../libs/creds" }
+futures = "0.3.34"
+prost = "0.14.4"
+prost-types = "0.14.4"
+rand = "0.10.3"
+secrecy = "0.10.3"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
+tonic = { version = "0.14.5", features = ["tls-ring", "tls-webpki-roots"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+uuid = { version = "1.26.1", features = ["v4"] }

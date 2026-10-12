@@ -1,0 +1,154 @@
+services:
+    auth_service:
+        build:
+            context: ./services/auth_service
+            dockerfile: Dockerfile
+        restart: unless-stopped
+        environment:
+            DEVELOPMENT_MODE: true
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+        ports:
+            - "8000:443"
+
+        volumes:
+            - ./crypt_keys/jwt_keys:/auth_service/crypt_keys/jwt_keys:ro
+
+        depends_on:
+            database_migrations:
+                condition: service_completed_successfully
+            redis:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+
+        healthcheck:
+            test: [ "CMD", "curl", "http://auth_service/health" ]
+            interval: 30s
+            timeout: 20s
+            retries: 3
+            start_period: 10s
+
+
+    database_migrations:
+        build:
+            context: ./services/database_migrations
+            dockerfile: Dockerfile
+        restart: on-failure
+        #command: "alembic revision --autogenerate -m \"change username limit\""
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        volumes:
+            - ./services/database_migrations/migrations/versions:/database_migrations/migrations/versions
+        depends_on:
+            postgres:
+                condition: service_healthy
+
+
+    
+    redis:
+        image: redis:8.2.2-alpine
+        restart: unless-stopped
+        ports:
+            - "6379:6379"
+        volumes:
+            - ./redis_data:/data
+        command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes" ]
+        healthcheck:
+            test: [ "CMD", "redis-cli", "-u", "redis://:${REDIS_PASSWORD}@localhost:6379", "ping" ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 20s
+
+
+    postgres:
+        image: postgres:18-alpine
+        restart: unless-stopped
+        ports:
+            - "5432:5432"
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+            PGDATA: /var/lib/postgresql/data
+
+        volumes:
+            - ./postgres_data:/var/lib/postgresql/data
+
+        healthcheck:
+            test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+            interval: 10s
+            timeout: 3s
+            retries: 3
+            start_interval: 10s
+            start_period: 0s
+
+    nats:
+        image: nats:2.15-alpine
+        restart: unless-stopped
+        ports:
+            - "4222:4222"
+            - "8222:8222"
+        environment:
+            NATS_SERVER_TOKEN: ${NATS_SERVER_TOKEN}
+        volumes:
+            - ./nats_data:/data/jetstream
+            - ./configurations/nats/nats.conf:/etc/nats/nats.conf:ro
+        command: ["-c", "/etc/nats/nats.conf"]
+
+        healthcheck:
+            test: ["CMD", "nats-server", "-status", "-port", "8222"]
+            interval: 10s
+            timeout: 3s
+            retries: 3
+            start_interval: 10s
+            start_period: 0s
+
+
+    clickhouse:
+        image: clickhouse/clickhouse-server:25.8-distroless
+        restart: unless-stopped
+        ports:
+            - "8123:8123" # HTTP интерфейс (для веб-интерфейсов, дашбордов, DBeaver)
+            - "9000:9000" # Native протокол (для clickhouse-client и некоторых драйверов)
+
+        volumes:
+            - ./ch_data:/var/lib/clickhouse
+            - ./ch_logs:/var/log/clickhouse
+
+        environment:
+              CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
+
+        healthcheck:
+            test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+
+    qdrant:
+        image: qdrant/qdrant:latest
+        restart: unless-stopped
+        ports:
+            - "6333:6333" # REST API (и Web-UI Дашборд)
+            - "6334:6334" # gRPC интерфейс (рекомендуется для кода)
+        environment:
+            RUN_MODE: production
+            QDRANT__SERVICE__API_KEY: ${QDRANT_SERVICE_API_KEY}
+        volumes:
+            - ./qdrant_storage:/qdrant/storage
+        ulimits:
+            nofile:
+                soft: 65535
+                hard: 65535

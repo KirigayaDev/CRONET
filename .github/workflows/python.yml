@@ -1,0 +1,37 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+  schedule:
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  python-security:
+    name: Python Security (SCA & SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Security checks
+        id: sec
+        continue-on-error: true
+        run: sh scripts/security-check.sh
+
+      - name: Warn if findings
+        if: steps.sec.outcome == 'failure'
+        run: echo "::warning title=Security::Найдены уязвимости, смотрите лог шага 'Security checks'"

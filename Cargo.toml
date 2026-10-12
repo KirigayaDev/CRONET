@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+exclude = ["fuzz"]
+members = [
+    "libs/contracts",
+    "libs/snmp-types",
+    "libs/bus",
+    "libs/creds",
+    "services/collectors/snmp-poller",
+    "services/collectors/trap-receiver",
+    "services/collectors/gnmi-telemetry",
+]
+
+[workspace.package]
+edition = "2026"
+license = "UNLICENSED"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"

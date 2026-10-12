@@ -1,0 +1,15 @@
+services:
+  nats:
+    image: nats:2.11
+    command: ["-js"]
+    ports: ["4222:4222"]
+  snmpsim:
+    image: python:3.12-slim
+    command: >
+      sh -c "pip install -q snmpsim-lextudio &&
+      snmpsim-command-responder --process-user=nobody --process-group=nogroup
+      --data-dir=/data --agent-udpv4-endpoint=0.0.0.0:1161
+      --v3-user=mon --v3-auth-key=authpass123 --v3-auth-proto=SHA256
+      --v3-priv-key=privpass123 --v3-priv-proto=AES128"
+    volumes: ["./:/data:ro"]
+    ports: ["1161:1161/udp"]

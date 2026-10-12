@@ -1,0 +1,28 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+import "netmon/v1/common.proto";
+
+// Сырой трап. Исходная датаграмма НЕ сохраняется: в SNMPv2c он содержит community
+// в открытом виде. Сопоставление source_ip -> device_id делает downstream.
+message RawTrap {
+  string trap_id = 1;                // уникален; идёт в Nats-Msg-Id
+  string collector_id = 2;
+  string source_ip = 3;
+  uint32 source_port = 4;
+  google.protobuf.Timestamp received_at = 5;
+  SnmpVersion snmp_version = 6;
+  bool inform = 7;                   // InformRequest (с подтверждением)
+  repeated VarBind varbinds = 8;     // для v2c: sysUpTime.0, snmpTrapOID.0, далее данные
+  // Только для SNMPv1-трапов (преобразования в v2c приёмник не делает)
+  V1TrapInfo v1 = 9;
+}
+
+message V1TrapInfo {
+  string enterprise = 1;
+  string agent_addr = 2;
+  int64 generic_trap = 3;
+  int64 specific_trap = 4;
+  uint32 timestamp = 5;
+}
