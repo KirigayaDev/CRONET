@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Example files"
+paths = [
+    '''control_panel/\.env\.example$''',
+    '''\.env\.example$'''
+]
