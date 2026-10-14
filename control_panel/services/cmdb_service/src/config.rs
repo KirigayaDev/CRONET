@@ -46,9 +46,7 @@ impl Config {
         if !(value.starts_with("postgres://") || value.starts_with("postgresql://"))
             || PgConnectOptions::from_str(value).is_err()
         {
-            return Err(Error::validation(
-                "DATABASE_URL must be a valid PostgreSQL URL",
-            ));
+            return Err(Error::validation("DATABASE_URL must be a valid PostgreSQL URL"));
         }
         Ok(Self {
             database_url: value.to_owned(),
@@ -65,22 +63,15 @@ impl Config {
         &self.database_url
     }
     pub fn redis_url(&self) -> Result<&str> {
-        self.redis_url
-            .as_deref()
-            .ok_or_else(|| Error::validation("REDIS_URL is required"))
+        self.redis_url.as_deref().ok_or_else(|| Error::validation("REDIS_URL is required"))
     }
     pub fn public_key_path(&self) -> Result<&std::path::Path> {
-        self.public_key_path
-            .as_deref()
-            .ok_or_else(|| Error::validation("JWT_PUBLIC_KEY_PATH is required"))
+        self.public_key_path.as_deref().ok_or_else(|| Error::validation("JWT_PUBLIC_KEY_PATH is required"))
     }
 }
 
 fn required_env(name: &str) -> Result<String> {
-    env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .ok_or_else(|| Error::validation(format!("{name} is required")))
+    env::var(name).ok().filter(|v| !v.trim().is_empty()).ok_or_else(|| Error::validation(format!("{name} is required")))
 }
 
 #[cfg(test)]

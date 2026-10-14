@@ -5,6 +5,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Invalid workflow state: {0}")]
+    InvalidState(&'static str),
+    #[error("Import validation failed; revalidate the batch for row details")]
+    ImportValidation,
     #[error("{0}")]
     Internal(&'static str),
     #[error("{entity} {id} was not found")]
@@ -12,10 +16,7 @@ pub enum Error {
     #[error("Invalid input: {0}")]
     Validation(String),
     #[error("Database constraint conflict ({sqlstate}, {constraint:?})")]
-    Conflict {
-        sqlstate: String,
-        constraint: Option<String>,
-    },
+    Conflict { sqlstate: String, constraint: Option<String> },
     #[error("Transaction must be retried ({sqlstate})")]
     Retryable { sqlstate: String },
     // Do not echo driver messages, SQL values or connection credentials in Display.
@@ -36,16 +37,10 @@ impl Error {
 impl From<sqlx::Error> for Error {
     fn from(error: sqlx::Error) -> Self {
         if let sqlx::Error::Database(database) = &error {
-            let code = database
-                .code()
-                .map(|code| code.into_owned())
-                .unwrap_or_default();
+            let code = database.code().map(|code| code.into_owned()).unwrap_or_default();
             match code.as_str() {
                 "23505" | "23503" | "23P01" => {
-                    return Self::Conflict {
-                        sqlstate: code,
-                        constraint: database.constraint().map(str::to_owned),
-                    }
+                    return Self::Conflict { sqlstate: code, constraint: database.constraint().map(str::to_owned) }
                 }
                 "23514" | "23502" | "22P02" | "22003" => {
                     return Self::validation(format!("PostgreSQL rejected the input ({code})"));

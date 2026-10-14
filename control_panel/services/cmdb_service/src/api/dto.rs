@@ -31,9 +31,7 @@ impl From<domain::LifecycleStatus> for ApiLifecycle {
     }
 }
 pub fn parse<T: std::str::FromStr>(value: &str, field: &str) -> Result<T> {
-    value
-        .parse()
-        .map_err(|_| Error::validation(format!("Invalid {field}")))
+    value.parse().map_err(|_| Error::validation(format!("Invalid {field}")))
 }
 fn try_patch<T, U>(value: Patch<T>, f: impl FnOnce(T) -> Result<U>) -> Result<Patch<U>> {
     Ok(match value {
@@ -77,13 +75,7 @@ pub struct SiteDto {
 }
 impl From<domain::Site> for SiteDto {
     fn from(v: domain::Site) -> Self {
-        Self {
-            id: v.id,
-            created_at: v.created_at,
-            updated_at: v.updated_at,
-            name: v.name,
-            description: v.description,
-        }
+        Self { id: v.id, created_at: v.created_at, updated_at: v.updated_at, name: v.name, description: v.description }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -94,10 +86,7 @@ pub struct CreateSiteDto {
 impl TryFrom<CreateSiteDto> for domain::CreateSite {
     type Error = Error;
     fn try_from(v: CreateSiteDto) -> Result<Self> {
-        Ok(Self {
-            name: v.name,
-            description: v.description,
-        })
+        Ok(Self { name: v.name, description: v.description })
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -112,10 +101,7 @@ pub struct UpdateSiteDto {
 impl TryFrom<UpdateSiteDto> for domain::UpdateSite {
     type Error = Error;
     fn try_from(v: UpdateSiteDto) -> Result<Self> {
-        Ok(Self {
-            name: v.name,
-            description: v.description,
-        })
+        Ok(Self { name: v.name, description: v.description })
     }
 }
 
@@ -149,11 +135,7 @@ pub struct CreateRoomDto {
 impl TryFrom<CreateRoomDto> for domain::CreateRoom {
     type Error = Error;
     fn try_from(v: CreateRoomDto) -> Result<Self> {
-        Ok(Self {
-            site_id: v.site_id,
-            name: v.name,
-            description: v.description,
-        })
+        Ok(Self { site_id: v.site_id, name: v.name, description: v.description })
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -171,11 +153,7 @@ pub struct UpdateRoomDto {
 impl TryFrom<UpdateRoomDto> for domain::UpdateRoom {
     type Error = Error;
     fn try_from(v: UpdateRoomDto) -> Result<Self> {
-        Ok(Self {
-            site_id: v.site_id,
-            name: v.name,
-            description: v.description,
-        })
+        Ok(Self { site_id: v.site_id, name: v.name, description: v.description })
     }
 }
 
@@ -212,12 +190,7 @@ pub struct CreateRackDto {
 impl TryFrom<CreateRackDto> for domain::CreateRack {
     type Error = Error;
     fn try_from(v: CreateRackDto) -> Result<Self> {
-        Ok(Self {
-            room_id: v.room_id,
-            name: v.name,
-            height_u: v.height_u,
-            description: v.description,
-        })
+        Ok(Self { room_id: v.room_id, name: v.name, height_u: v.height_u, description: v.description })
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -238,12 +211,7 @@ pub struct UpdateRackDto {
 impl TryFrom<UpdateRackDto> for domain::UpdateRack {
     type Error = Error;
     fn try_from(v: UpdateRackDto) -> Result<Self> {
-        Ok(Self {
-            room_id: v.room_id,
-            name: v.name,
-            height_u: v.height_u,
-            description: v.description,
-        })
+        Ok(Self { room_id: v.room_id, name: v.name, height_u: v.height_u, description: v.description })
     }
 }
 
@@ -401,10 +369,7 @@ impl TryFrom<CreateInterfaceDto> for domain::CreateInterface {
             name: v.name,
             description: v.description,
             interface_type: v.interface_type,
-            mac_address: v
-                .mac_address
-                .map(|v| parse(&v, "mac_address"))
-                .transpose()?,
+            mac_address: v.mac_address.map(|v| parse(&v, "mac_address")).transpose()?,
         })
     }
 }

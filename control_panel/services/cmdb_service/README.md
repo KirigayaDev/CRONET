@@ -1,13 +1,14 @@
-# CMDB service: core, HTTP, gRPC and authentication
+# CMDB service: transactional audit, overrides and device CSV import
 
-Standalone Cargo package on `feature/d1-cmdb-api`. Stage 3 adds long-running
-HTTP/Axum and gRPC/tonic adapters to the existing core. Both transports share
-one Service and one Authenticator.
+Standalone Cargo package on `feature/d1-cmdb-api`. Stage 4 adds transactional
+audit, manual field ownership and staged CSV device import to the existing
+HTTP/Axum and gRPC/tonic APIs. Both transports share one Service and Authenticator.
 
 The existing Alembic head is `8b6e2f4a9c10`. This package never creates tables,
 changes schema, reads .env files, or runs migrations itself. Apply the existing
-Alembic chain before startup. Transactional audit generation, CSV workflow,
-Discovery, Scheduler and service-account identities are later work.
+Alembic chain before startup. The existing audit/override/import tables are
+reused without a new migration. Deployment/workspace integration, Discovery,
+Scheduler and service-account identities remain separate later work.
 
 ## Structure
 
@@ -17,7 +18,9 @@ cmdb_service/
   Cargo.lock
   README.md
   build.rs
+  rustfmt.toml
   proto/cmdb.proto
+  examples/devices-template.csv
   src/
     lib.rs
     main.rs
@@ -27,15 +30,20 @@ cmdb_service/
     models.rs
     repository.rs
     service.rs
+    workflow.rs
+    imports.rs
+    repository/workflow.rs
     auth.rs
     api/
       mod.rs
       dto.rs
       http.rs
       grpc.rs
+      workflow.rs
   tests/
     core.rs
     adapters.rs
+    support/workflow_tests.rs
     compose.core-test.yml
     Dockerfile.rust
 ```
@@ -51,7 +59,8 @@ Resolved versions are committed in Cargo.lock.
 
 | Dependency | Purpose |
 | --- | --- |
-| axum 0.8 | HTTP routing, middleware and extraction. |
+| axum 0.8 | HTTP routing, middleware, extraction and bounded multipart upload. |
+| csv 1.4 | Device CSV parsing, with an additional strict quote/header/size guard. |
 | tonic / tonic-prost 0.14 | gRPC transport and protobuf codec. |
 | prost / prost-types 0.14 | Typed messages, standard Timestamp/NullValue. |
 | tonic-prost-build 0.14 (build) | Generate clients and servers from cmdb.proto. |
@@ -68,8 +77,8 @@ Resolved versions are committed in Cargo.lock.
 
 Existing tokio, sqlx 0.8.6, uuid, chrono, serde, thiserror, ipnetwork and
 mac_address remain the core dependencies. Tokio adds net/signal/sync features.
-SQLx enables only PostgreSQL and required native types. No CSV, NATS, SNMP,
-Discovery or Scheduler dependency is added.
+SQLx enables PostgreSQL, native types and JSONB. No NATS, SNMP, Discovery or
+Scheduler dependency is added.
 
 Building requires protoc and standard protobuf includes. The isolated test
 Dockerfile installs protobuf-compiler, libprotobuf-dev and OpenSSL without
@@ -139,7 +148,9 @@ default, 25/50 ms delays, only for SQLSTATE 40001/40P01. A composed closure must
 be safe to replay without external side effects. Uniqueness/FK/exclusion errors,
 connection failures and unknown commit outcomes are not retried. Caller-owned
 transactions propagate errors to their owner. The field-override read helper
-remains; field-lock write workflow and audit generation are deferred.
+remains; user mutations now append audit and ownership markers atomically.
+Caller-owned *_in helpers remain available for internal composed operations;
+HTTP/gRPC always supply a MutationContext to the common audited wrapper.
 
 ## Authentication and authorization
 
@@ -183,8 +194,8 @@ valid users without write privileges are Forbidden.
 HTTP POST/PATCH/DELETE, including decommission, and gRPC mutations require
 either flag. No role table or claim-based privilege is invented. Principal
 contains user_id and both flags and is retained in request extensions/handlers
-for future transactional audit actor propagation. This stage writes no partial
-audit.
+for transactional audit actor propagation. Canonical mutations use this actor
+in their entity/audit/override transaction.
 
 There is no separate machine-to-machine/service-account identity model yet.
 gRPC accepts existing **user access JWTs** only. D2/D3 integration must decide
@@ -193,7 +204,8 @@ that model separately; no static password or fake admin token is provided.
 ## HTTP routes
 
 All paths below are relative to `/api/v1/cmdb` and require authentication.
-Each listed method is an operation: 30 business operations total.
+These are the original 30 business operations; twelve workflow operations below
+bring the protected HTTP total to 42.
 
 | Path | Methods | List filters |
 | --- | --- | --- |
@@ -238,7 +250,7 @@ nullability without coupling core models to Axum/OpenAPI.
 
 ### OpenAPI and errors
 
-utoipa generates /openapi.json with all 33 operations, request/response schemas,
+utoipa generates /openapi.json with all 45 operations, request/response schemas,
 UUID parameters, filters, pagination bounds/defaults, Bearer JWT security and
 main error responses. Public routes have no security requirement. Tests parse
 serialized JSON back into utoipa's OpenApi and inspect routes/security/schemas.
@@ -248,7 +260,8 @@ messages, including extractor failures, unknown routes and unsupported methods.
 
 | Condition | HTTP | gRPC |
 | --- | --- | --- |
-| Validation / malformed input | 400 | INVALID_ARGUMENT |
+| Validation / malformed input / invalid import rows | 400 | INVALID_ARGUMENT |
+| Finalized batch or unaccepted import warnings | 409 | FAILED_PRECONDITION |
 | Missing/invalid access JWT | 401 + WWW-Authenticate: Bearer | UNAUTHENTICATED |
 | Authenticated user cannot write | 403 | PERMISSION_DENIED |
 | Missing entity | 404 | NOT_FOUND |
@@ -296,6 +309,158 @@ payloads, URLs with credentials and key bodies are not logged. A scoped info
 filter for cmdb_service/tower-http prevents environment-enabled dependency debug
 logging. No permissive CORS layer is added.
 
+## Transactional audit and request IDs
+
+Every canonical mutation from HTTP or gRPC scopes the shared Service with:
+actor_type, actor_id, source, request_id and optional import_batch_id. Current
+actors are users from Principal. Sources are http, grpc and csv_import. The
+context also has types for future service/discovery actors, without implementing
+Discovery or M2M authentication now.
+
+A valid single X-Request-ID UUID is accepted by HTTP; otherwise UUIDv4 is
+created. Every HTTP response includes X-Request-ID, including errors. gRPC
+accepts a valid single x-request-id metadata UUID or generates UUIDv4. Context
+is created once per business request and remains the same across transaction
+retries. No JWT enters Service, audit snapshots or ownership markers.
+
+The shared mutation wrapper locks an existing entity before update/delete,
+reads its canonical snapshot, runs the existing entity operation, appends audit,
+and upserts applicable manual markers in one transaction. Delete removes the
+entity's markers in that transaction. Failure in any part rolls back all parts.
+The bounded retry helper replays the entire transaction for 40001/40P01.
+
+Actions: create, update, delete, decommission, field_override_set,
+field_override_clear. Create has NULL before and the created entity after;
+update/decommission have both snapshots; delete has before and NULL after.
+Explicit marker set/clear snapshots describe the marker, while entity_type/id
+identify its canonical target. Auto markers accompany the canonical event rather
+than producing a second event for every field. JSONB contains canonical data,
+never auth/user records or credentials. detected_at and changed_at use database
+clock_timestamp() for these known user changes. Audit remains append-only.
+
+Audit reads accept entity_type/entity_id/actor_id/request_id/import_batch_id,
+use SQL limit/offset (50/0, maximum 200) and detected_at DESC, id DESC.
+There are no audit mutation endpoints.
+
+## Manual field overrides
+
+The exact allowlist is:
+
+| Entity | Fields |
+| --- | --- |
+| devices | hostname, device_type, vendor, model, serial |
+| interfaces | if_index, name, description, interface_type, mac_address |
+| ip_addresses | address |
+| sites / rooms / racks | None |
+
+Manual creation locks populated optional technical fields and required technical
+name/address fields. Absent optional values receive no marker. PATCH Set or
+Clear marks an explicitly touched technical field, even when its value is NULL
+or unchanged. Placement, lifecycle, parent IDs and is_management never auto-lock.
+
+Markers store no value. Upsert retains one marker per entity/field, refreshes
+locked_at and sets locked_by to the latest user. Explicit set/clear requires
+admin/super_admin, a supported EntityType, a strict allowed field and a locked
+existing canonical entity. No dynamic field-name SQL is constructed. Marker
+set/clear also appends audit in its transaction. Canonical delete cleans markers
+and records one canonical delete event.
+
+## Device CSV staging
+
+Use examples/devices-template.csv. Replace its example location names with
+existing site/room/rack names. CSV is UTF-8 (optional BOM), comma separated,
+with normal quoting/doubled quotes and quoted newlines. Headers may be reordered
+but must contain exactly these eleven unique names:
+
+site, room, rack, start_unit, height_u, hostname, device_type, vendor, model,
+serial, lifecycle_status.
+
+Maximum file size is 5 MiB and maximum row count is 10,000. Multipart payload
+allows an additional 64 KiB envelope; file chunks are independently bounded.
+Exactly one file part is accepted. Missing/duplicate/unknown headers, invalid
+UTF-8, malformed row lengths/quotes, NUL characters and exceeded limits reject
+the upload before any batch is committed. XLSX is unsupported.
+
+Upload -> parse -> staging batch/rows -> initial validation -> preview -> typed
+row edit -> revalidation -> explicit confirm. Staging performs no canonical
+inventory writes and does not create sites/rooms/racks.
+
+raw_data retains the exact logical CSV strings, including whitespace.
+working_data trims optional strings, defaults empty lifecycle to active and
+retains decimal text for dimensions so invalid source values remain editable.
+The edit DTO accepts typed integer/lifecycle values, omitted fields, values and
+explicit nulls; unknown fields such as raw_data are rejected. Technical clears
+retain internal intent for ownership at confirm; that bookkeeping is excluded
+from response DTOs and OpenAPI. Every edit revalidates the whole batch so an
+intra-batch overlap cannot leave a neighboring row falsely valid.
+
+Placed devices require a complete existing site -> room -> rack hierarchy plus
+positive 32-bit start_unit/height_u. Names resolve using the existing PostgreSQL
+case/whitespace normalization, scoped to their parents. Unplaced devices leave
+location/start_unit empty and may retain a positive height_u. Lifecycle is
+active/maintenance/decommissioned. Bounds and current occupancy are checked
+independently of lifecycle. A sorted interval sweep detects overlaps between
+otherwise valid rows of the same batch in O(n log n).
+
+Errors and warnings are arrays of {field, code, message}. Shape/lifecycle,
+positive dimensions, incomplete/missing hierarchy, out-of-bounds units,
+canonical occupancy and batch overlaps are errors. A nonempty hostname/serial
+already present in canonical inventory is a warning, because neither column
+is globally unique in the schema.
+
+Rows become valid/invalid after validation and imported after commit. A batch
+is validated when all rows are valid, pending otherwise, confirmed after
+successful commit or cancelled after explicit cancel. Finalized batches cannot
+edit/revalidate/confirm/cancel again. Read endpoints allow any authenticated
+user; upload/edit/revalidate/confirm/cancel require admin/super_admin.
+
+## Atomic import confirmation
+
+Confirm locks the batch FOR UPDATE and all staging rows FOR UPDATE, checks state,
+then revalidates current working data. It locks resolved racks in UUID order
+using the same rows protected by existing placement triggers, and revalidates
+again after waiting for those locks. This catches a competing placement/resize
+committing while confirm waits. Invalid rows reject confirmation; current
+warnings require accept_warnings=true.
+
+In the same transaction, all devices are created, each receives an audit event
+with source=csv_import/action=create/current user/current request/import_batch_id,
+and populated or explicitly cleared manual technical fields receive markers.
+Then all rows become imported and batch becomes confirmed with confirmed_at.
+A failure at device N rolls back devices 1..N-1, audit, overrides and state.
+A second concurrent confirm waits for the batch lock and then sees finalized
+state. Existing database constraints remain the final race/concurrency guard.
+
+Invalid revalidation or a late constraint conflict returns 400/409 after the
+canonical transaction rolls back. A separate staging-only revalidation refreshes
+preview errors/warnings when the batch is still editable. Its failure never
+hides the original canonical failure; cancellation/confirmation by another
+request may prevent that optional refresh. Revalidate can always refresh an
+editable batch explicitly. Unaccepted warnings return 409 without writes.
+
+## Workflow HTTP endpoints
+
+All paths below are prefixed with /api/v1/cmdb and use the existing auth policy.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET | /audit-events | Filtered/paginated audit |
+| GET | /audit-events/{id} | Audit event |
+| GET | /field-overrides | Filtered/paginated markers |
+| POST | /field-overrides | Audited idempotent marker set |
+| DELETE | /field-overrides/{entity_type}/{entity_id}/{field_name} | Audited clear |
+| POST | /imports/devices | multipart/form-data file upload |
+| GET | /imports/{batch_id} | Batch summary/counts |
+| GET | /imports/{batch_id}/rows | Paginated preview |
+| PATCH | /imports/{batch_id}/rows/{row_id} | Typed edit and revalidation |
+| POST | /imports/{batch_id}/revalidate | Revalidate all rows |
+| POST | /imports/{batch_id}/confirm | {"accept_warnings": true/false} |
+| POST | /imports/{batch_id}/cancel | Finalize without inventory writes |
+
+gRPC retains its twelve existing typed RPCs and wire contract. Its seven
+mutations gain audit/auto overrides through the same Service; no CSV, override
+management or audit-read RPC is added. OpenAPI includes all new DTOs and multipart.
+
 ## Isolated tests and quality commands
 
 Native rustc on this Windows host fails even at -vV with exit code 0xc0e90002.
@@ -305,12 +470,12 @@ No host toolchain or shared configuration is changed.
 Run from this directory with a fresh unique Compose project name:
 
 ```sh
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml up -d --build rust
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml exec -T rust cargo fmt --check
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml exec -T rust cargo check --locked
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml exec -T rust cargo clippy --locked --all-targets -- -D warnings
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml exec -T rust cargo test --locked
-docker compose -p cronet-cmdb-api-01a12211 -f tests/compose.core-test.yml down --volumes
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml up -d --build rust
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo fmt --check
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo check --locked
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo clippy --locked --all-targets -- -D warnings
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo test --locked
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml down --volumes
 ```
 
 This package's own Compose uses PostgreSQL 18 and Redis 8.2.2 in tmpfs, without
@@ -326,13 +491,14 @@ temporary RSA keys inside the test container. No actual project key,
 production DB/Redis or secret-bearing .env is read. No tests are silently
 skipped. Remove project/volumes to discard keys, fixtures and build caches.
 
-Stage 3 validation passed:
+Stage 4 validation passed:
 
 - cargo fmt --check;
 - cargo check --locked;
 - cargo clippy --locked --all-targets -- -D warnings;
-- cargo test --locked: 5 unit + 12 previous core integration + 14 adapter/auth
-  integration = 31 tests, zero ignored;
+- cargo test --locked: 5 unit + 12 previous core integration + 32 adapter/auth/
+  workflow integration = 49 tests, zero ignored. All 31 previous Rust tests
+  remain; 18 meaningful workflow tests were added;
 - unchanged Alembic suite: 27 tests, including upgrade to head, downgrade to
   72ca3097da29, repeated upgrade to 8b6e2f4a9c10 and users preservation;
 - protobuf generation, real HTTP/gRPC startup and OpenAPI generation/parsing.
@@ -349,21 +515,81 @@ logical uniqueness, placement, all-lifecycle occupancy and bounded retries.
 The startup expectation now requires API configuration, and Site listing
 explicitly requests a page instead of assuming unbounded lists.
 
+Workflow tests additionally cover actor/request IDs, before/after/delete,
+audit/override failure rollback, a real 40001 retry after audit insertion,
+override allowlists/idempotency/cleanup, all CSV validation and warning cases,
+raw-data immutability, typed edits and explicit NULL intent, file/row limits,
+atomic rollback at device N, concurrent confirm, and competing rack placement
+committing while confirm is blocked. OpenAPI is validated component by component.
+
 Existing migration regression commands are in
 `../database_migrations/tests/README.cmdb.md`. That suite and its Compose run
 unchanged in a separate disposable project.
 
-## Following stages and shared code
+## Stage 5 integration and shared code
 
-Stage 4 remains transactional audit (Principal.user_id in the entity mutation
-transaction), CSV validation/confirmation and import_batches/import_rows workflow.
-Discovery/field-lock enforcement and D2/D3 machine identities remain later
-decisions. This stage introduces no partial audit, CSV endpoint, UI, gateway,
-NATS, Scheduler, Discovery or service account.
+Merge origin/main at 401c3db completed without conflicts in technical commit
+949a907fd77e26190a004de53dd4de4dc810a197. All stage 4 implementation changes are
+inside this package. No old/new auth, migration/models, shared Compose, root
+manifest/lock, CI, libs, collectors, contracts or scripts were manually changed.
 
-No shared-code change is required to build, run or test this stage independently.
-Common deployment integration is a separate change: runtime image/service entry
-and public-key/DB/Redis config are not added here. auth_service, existing Alembic
-files/models, common Compose, scripts and CI are unchanged by implementation.
-The only shared-file difference from the previous feature commit is from the
-authorized conflict-free origin/main merge.
+Root workspace metadata lists contracts, snmp-types, bus, creds, snmp-poller,
+trap-receiver and gnmi-telemetry. CMDB is not a member: root cargo test --workspace
+and the current root Rust CI do NOT exercise this package. An empty local
+[workspace] preserves standalone Cargo behavior after the root manifest appeared;
+read-only metadata was checked from the full repository, not just the isolated
+source mount. Local rustfmt.toml matches the new root formatting conventions.
+
+Both control_panel and services/control_panel exist. The latter has no explicit
+canonical-replacement statement and currently contains only the old Alembic
+chain through 72ca3097da29, without D1 revision 8b6e2f4a9c10. CMDB remains in its
+current location and uses the existing D1 chain. It was not moved or copied.
+
+Stage 5 must decide the canonical layout, integrate CMDB and the D1 migration
+chain together, add root workspace/CI coverage with isolated PG/Redis/protobuf
+setup, provide a runtime image and common Compose service, and agree deployment
+DB/Redis/public-key environment conventions. Discovery/Scheduler/M2M remain
+separate architecture work. No Pull Request was created in stage 4.
+
+## Требуются изменения общего кода
+
+These are stage 5 candidates only, NOT applied. If the current package location
+is retained, the minimal root membership diff is:
+
+```diff
+ # Cargo.toml, workspace.members
++"control_panel/services/cmdb_service",
+```
+
+The package's empty [workspace] must then be removed and its dependency pins
+reconciled into the root Cargo.lock. Root Rust CI must run the integration tests
+with the actual isolated migrated PostgreSQL/Redis/protoc setup; membership alone
+cannot make the present CI job execute them successfully. Exact CI/layout changes
+depend on the canonical-path decision. Do not duplicate CMDB to evade that decision.
+
+The chosen common Compose needs a service along these lines after a runtime
+image has been built (no external port publication is proposed here):
+
+```diff
+ services:
++  cmdb_service:
++    image: ${CMDB_IMAGE}
++    environment:
++      DATABASE_URL: ${CMDB_DATABASE_URL}
++      REDIS_URL: ${CMDB_REDIS_URL}
++      JWT_PUBLIC_KEY_PATH: /run/cmdb-public-key.pem
++    volumes:
++      - ./crypt_keys/jwt_keys/public_key.pem:/run/cmdb-public-key.pem:ro
++    depends_on:
++      database_migrations:
++        condition: service_completed_successfully
++      postgres:
++        condition: service_healthy
++      redis:
++        condition: service_healthy
+```
+
+The selected deployment .env.example/documentation would declare CMDB_IMAGE,
+CMDB_DATABASE_URL and CMDB_REDIS_URL placeholders and public-key provisioning.
+Actual credential values must not enter Git. These shared changes, the path
+consolidation and migration transfer require the separate stage 5 scope.

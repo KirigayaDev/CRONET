@@ -13,10 +13,7 @@ pub struct Pagination {
 
 impl Default for Pagination {
     fn default() -> Self {
-        Self {
-            limit: 50,
-            offset: 0,
-        }
+        Self { limit: 50, offset: 0 }
     }
 }
 
@@ -28,9 +25,7 @@ impl Pagination {
     }
     pub fn validate(self) -> crate::Result<()> {
         if !(1..=200).contains(&self.limit) || self.offset < 0 {
-            return Err(crate::Error::validation(
-                "Pagination requires limit 1..=200 and offset >= 0",
-            ));
+            return Err(crate::Error::validation("Pagination requires limit 1..=200 and offset >= 0"));
         }
         Ok(())
     }
@@ -350,18 +345,14 @@ mod tests {
         ] {
             let input: UpdateSite = serde_json::from_str(json).unwrap();
             assert_eq!(input.description, expected);
-            let again: UpdateSite =
-                serde_json::from_value(serde_json::to_value(input).unwrap()).unwrap();
+            let again: UpdateSite = serde_json::from_value(serde_json::to_value(input).unwrap()).unwrap();
             assert_eq!(again.description, expected);
         }
     }
 
     #[test]
     fn lifecycle_and_network_inputs_are_typed() {
-        assert_eq!(
-            serde_json::to_string(&LifecycleStatus::Decommissioned).unwrap(),
-            "\"decommissioned\""
-        );
+        assert_eq!(serde_json::to_string(&LifecycleStatus::Decommissioned).unwrap(), "\"decommissioned\"");
         assert!(serde_json::from_str::<LifecycleStatus>("\"other\"").is_err());
         assert!("192.0.2.1/24".parse::<IpNetwork>().is_ok());
         assert!("2001:db8::1/64".parse::<IpNetwork>().is_ok());

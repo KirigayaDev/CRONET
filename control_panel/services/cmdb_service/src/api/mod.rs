@@ -1,6 +1,7 @@
 pub mod dto;
 pub mod grpc;
 pub mod http;
+pub mod workflow;
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -21,9 +22,7 @@ pub async fn serve(
         .with_graceful_shutdown(wait_shutdown(http_stop))
         .into_future();
     let grpc = tonic::transport::Server::builder()
-        .add_service(grpc::pb::cmdb_server::CmdbServer::new(grpc::GrpcApi::new(
-            state,
-        )))
+        .add_service(grpc::pb::cmdb_server::CmdbServer::new(grpc::GrpcApi::new(state)))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::TcpListenerStream::new(grpc_listener),
             wait_shutdown(receiver),

@@ -1,5 +1,10 @@
 //! Business operations shared by future transports. SQL belongs to Repository.
-use crate::{models::*, repository::Repository, Error, Result};
+use crate::{
+    models::*,
+    repository::Repository,
+    workflow::{manual_fields, Action},
+    Error, Result,
+};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::{future::Future, pin::Pin, time::Duration};
 use uuid::Uuid;
@@ -14,42 +19,32 @@ pub struct RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            delay: Duration::from_millis(25),
-        }
+        Self { max_attempts: 3, delay: Duration::from_millis(25) }
     }
 }
 
 impl RetryPolicy {
     pub fn new(max_attempts: u32, delay: Duration) -> Result<Self> {
         if !(1..=5).contains(&max_attempts) || delay > Duration::from_secs(1) {
-            return Err(Error::validation(
-                "Retry policy requires 1..=5 attempts and delay <= 1 second",
-            ));
+            return Err(Error::validation("Retry policy requires 1..=5 attempts and delay <= 1 second"));
         }
-        Ok(Self {
-            max_attempts,
-            delay,
-        })
+        Ok(Self { max_attempts, delay })
     }
 }
 
 #[derive(Clone)]
 pub struct Service {
-    pool: PgPool,
+    pub(crate) pool: PgPool,
     retry: RetryPolicy,
+    pub(crate) context: Option<crate::workflow::MutationContext>,
 }
 
 impl Service {
     pub fn new(pool: PgPool) -> Self {
-        Self {
-            pool,
-            retry: RetryPolicy::default(),
-        }
+        Self { pool, retry: RetryPolicy::default(), context: None }
     }
     pub fn with_retry_policy(pool: PgPool, retry: RetryPolicy) -> Self {
-        Self { pool, retry }
+        Self { pool, retry, context: None }
     }
 
     /// Opt-in replay of a whole transaction. Closure must have no external side
@@ -81,25 +76,18 @@ impl Service {
     }
 
     pub async fn create_site(&self, input: CreateSite) -> Result<Site> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Sites, None, Action::Create, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::create_site_in(tx, &input).await })
         })
         .await
     }
-    pub async fn create_site_in(
-        tx: &mut Transaction<'_, Postgres>,
-        input: &CreateSite,
-    ) -> Result<Site> {
+    pub async fn create_site_in(tx: &mut Transaction<'_, Postgres>, input: &CreateSite) -> Result<Site> {
         validate_name(&input.name)?;
         Repository::create_site(tx, input).await
     }
     pub async fn get_site(&self, id: Uuid) -> Result<Site> {
-        found(
-            Repository::get_site(&mut *self.pool.acquire().await?, id).await?,
-            "site",
-            id,
-        )
+        found(Repository::get_site(&mut *self.pool.acquire().await?, id).await?, "site", id)
     }
     pub async fn list_sites(&self) -> Result<Vec<Site>> {
         self.list_sites_page(Pagination::default()).await
@@ -113,57 +101,44 @@ impl Service {
         Repository::find_site_by_name(&mut *self.pool.acquire().await?, name).await
     }
     pub async fn update_site(&self, id: Uuid, input: UpdateSite) -> Result<Site> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Sites, Some(id), Action::Update, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::update_site_in(tx, id, &input).await })
         })
         .await
     }
-    pub async fn update_site_in(
-        tx: &mut Transaction<'_, Postgres>,
-        id: Uuid,
-        input: &UpdateSite,
-    ) -> Result<Site> {
+    pub async fn update_site_in(tx: &mut Transaction<'_, Postgres>, id: Uuid, input: &UpdateSite) -> Result<Site> {
         validate_name_patch(&input.name)?;
         found(Repository::update_site(tx, id, input).await?, "site", id)
     }
     pub async fn delete_site(&self, id: Uuid) -> Result<()> {
-        self.retryable_transaction(|tx| Box::pin(Self::delete_site_in(tx, id)))
-            .await
+        self.mutation(EntityType::Sites, Some(id), Action::Delete, vec![], move |tx| {
+            Box::pin(Self::delete_site_in(tx, id))
+        })
+        .await
     }
     pub async fn delete_site_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<()> {
         deleted(Repository::delete_site(tx, id).await?, "site", id)
     }
 
     pub async fn create_room(&self, input: CreateRoom) -> Result<Room> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Rooms, None, Action::Create, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::create_room_in(tx, &input).await })
         })
         .await
     }
-    pub async fn create_room_in(
-        tx: &mut Transaction<'_, Postgres>,
-        input: &CreateRoom,
-    ) -> Result<Room> {
+    pub async fn create_room_in(tx: &mut Transaction<'_, Postgres>, input: &CreateRoom) -> Result<Room> {
         validate_name(&input.name)?;
         Repository::create_room(tx, input).await
     }
     pub async fn get_room(&self, id: Uuid) -> Result<Room> {
-        found(
-            Repository::get_room(&mut *self.pool.acquire().await?, id).await?,
-            "room",
-            id,
-        )
+        found(Repository::get_room(&mut *self.pool.acquire().await?, id).await?, "room", id)
     }
     pub async fn list_rooms(&self, site_id: Option<Uuid>) -> Result<Vec<Room>> {
         self.list_rooms_page(site_id, Pagination::default()).await
     }
-    pub async fn list_rooms_page(
-        &self,
-        site_id: Option<Uuid>,
-        page: Pagination,
-    ) -> Result<Vec<Room>> {
+    pub async fn list_rooms_page(&self, site_id: Option<Uuid>, page: Pagination) -> Result<Vec<Room>> {
         page.validate()?;
         Repository::list_rooms(&mut *self.pool.acquire().await?, site_id, page).await
     }
@@ -172,59 +147,46 @@ impl Service {
         Repository::find_room_by_name(&mut *self.pool.acquire().await?, site_id, name).await
     }
     pub async fn update_room(&self, id: Uuid, input: UpdateRoom) -> Result<Room> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Rooms, Some(id), Action::Update, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::update_room_in(tx, id, &input).await })
         })
         .await
     }
-    pub async fn update_room_in(
-        tx: &mut Transaction<'_, Postgres>,
-        id: Uuid,
-        input: &UpdateRoom,
-    ) -> Result<Room> {
+    pub async fn update_room_in(tx: &mut Transaction<'_, Postgres>, id: Uuid, input: &UpdateRoom) -> Result<Room> {
         required(&input.site_id, "site_id")?;
         validate_name_patch(&input.name)?;
         found(Repository::update_room(tx, id, input).await?, "room", id)
     }
     pub async fn delete_room(&self, id: Uuid) -> Result<()> {
-        self.retryable_transaction(|tx| Box::pin(Self::delete_room_in(tx, id)))
-            .await
+        self.mutation(EntityType::Rooms, Some(id), Action::Delete, vec![], move |tx| {
+            Box::pin(Self::delete_room_in(tx, id))
+        })
+        .await
     }
     pub async fn delete_room_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<()> {
         deleted(Repository::delete_room(tx, id).await?, "room", id)
     }
 
     pub async fn create_rack(&self, input: CreateRack) -> Result<Rack> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Racks, None, Action::Create, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::create_rack_in(tx, &input).await })
         })
         .await
     }
-    pub async fn create_rack_in(
-        tx: &mut Transaction<'_, Postgres>,
-        input: &CreateRack,
-    ) -> Result<Rack> {
+    pub async fn create_rack_in(tx: &mut Transaction<'_, Postgres>, input: &CreateRack) -> Result<Rack> {
         validate_name(&input.name)?;
         positive("height_u", Some(input.height_u))?;
         Repository::create_rack(tx, input).await
     }
     pub async fn get_rack(&self, id: Uuid) -> Result<Rack> {
-        found(
-            Repository::get_rack(&mut *self.pool.acquire().await?, id).await?,
-            "rack",
-            id,
-        )
+        found(Repository::get_rack(&mut *self.pool.acquire().await?, id).await?, "rack", id)
     }
     pub async fn list_racks(&self, room_id: Option<Uuid>) -> Result<Vec<Rack>> {
         self.list_racks_page(room_id, Pagination::default()).await
     }
-    pub async fn list_racks_page(
-        &self,
-        room_id: Option<Uuid>,
-        page: Pagination,
-    ) -> Result<Vec<Rack>> {
+    pub async fn list_racks_page(&self, room_id: Option<Uuid>, page: Pagination) -> Result<Vec<Rack>> {
         page.validate()?;
         Repository::list_racks(&mut *self.pool.acquire().await?, room_id, page).await
     }
@@ -233,17 +195,13 @@ impl Service {
         Repository::find_rack_by_name(&mut *self.pool.acquire().await?, room_id, name).await
     }
     pub async fn update_rack(&self, id: Uuid, input: UpdateRack) -> Result<Rack> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::Racks, Some(id), Action::Update, vec![], move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::update_rack_in(tx, id, &input).await })
         })
         .await
     }
-    pub async fn update_rack_in(
-        tx: &mut Transaction<'_, Postgres>,
-        id: Uuid,
-        input: &UpdateRack,
-    ) -> Result<Rack> {
+    pub async fn update_rack_in(tx: &mut Transaction<'_, Postgres>, id: Uuid, input: &UpdateRack) -> Result<Rack> {
         required(&input.room_id, "room_id")?;
         required(&input.height_u, "height_u")?;
         validate_name_patch(&input.name)?;
@@ -251,51 +209,66 @@ impl Service {
         found(Repository::update_rack(tx, id, input).await?, "rack", id)
     }
     pub async fn delete_rack(&self, id: Uuid) -> Result<()> {
-        self.retryable_transaction(|tx| Box::pin(Self::delete_rack_in(tx, id)))
-            .await
+        self.mutation(EntityType::Racks, Some(id), Action::Delete, vec![], move |tx| {
+            Box::pin(Self::delete_rack_in(tx, id))
+        })
+        .await
     }
     pub async fn delete_rack_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<()> {
         deleted(Repository::delete_rack(tx, id).await?, "rack", id)
     }
 
     pub async fn create_device(&self, input: CreateDevice) -> Result<Device> {
-        self.retryable_transaction(|tx| {
-            let input = input.clone();
-            Box::pin(async move { Self::create_device_in(tx, &input).await })
-        })
+        self.mutation(
+            EntityType::Devices,
+            None,
+            Action::Create,
+            manual_fields(&[
+                ("hostname", input.hostname.is_some()),
+                ("device_type", input.device_type.is_some()),
+                ("vendor", input.vendor.is_some()),
+                ("model", input.model.is_some()),
+                ("serial", input.serial.is_some()),
+            ]),
+            move |tx| {
+                let input = input.clone();
+                Box::pin(async move { Self::create_device_in(tx, &input).await })
+            },
+        )
         .await
     }
-    pub async fn create_device_in(
-        tx: &mut Transaction<'_, Postgres>,
-        input: &CreateDevice,
-    ) -> Result<Device> {
+    pub async fn create_device_in(tx: &mut Transaction<'_, Postgres>, input: &CreateDevice) -> Result<Device> {
         positive("start_unit", input.start_unit)?;
         positive("height_u", input.height_u)?;
         Repository::create_device(tx, input).await
     }
     pub async fn get_device(&self, id: Uuid) -> Result<Device> {
-        found(
-            Repository::get_device(&mut *self.pool.acquire().await?, id).await?,
-            "device",
-            id,
-        )
+        found(Repository::get_device(&mut *self.pool.acquire().await?, id).await?, "device", id)
     }
     pub async fn list_devices(&self, filter: &DeviceFilter) -> Result<Vec<Device>> {
         self.list_devices_page(filter, Pagination::default()).await
     }
-    pub async fn list_devices_page(
-        &self,
-        filter: &DeviceFilter,
-        page: Pagination,
-    ) -> Result<Vec<Device>> {
+    pub async fn list_devices_page(&self, filter: &DeviceFilter, page: Pagination) -> Result<Vec<Device>> {
         page.validate()?;
         Repository::list_devices(&mut *self.pool.acquire().await?, filter, page).await
     }
     pub async fn update_device(&self, id: Uuid, input: UpdateDevice) -> Result<Device> {
-        self.retryable_transaction(|tx| {
-            let input = input.clone();
-            Box::pin(async move { Self::update_device_in(tx, id, &input).await })
-        })
+        self.mutation(
+            EntityType::Devices,
+            Some(id),
+            Action::Update,
+            manual_fields(&[
+                ("hostname", input.hostname.is_changed()),
+                ("device_type", input.device_type.is_changed()),
+                ("vendor", input.vendor.is_changed()),
+                ("model", input.model.is_changed()),
+                ("serial", input.serial.is_changed()),
+            ]),
+            move |tx| {
+                let input = input.clone();
+                Box::pin(async move { Self::update_device_in(tx, id, &input).await })
+            },
+        )
         .await
     }
     pub async fn update_device_in(
@@ -306,63 +279,70 @@ impl Service {
         required(&input.lifecycle_status, "lifecycle_status")?;
         positive("start_unit", input.start_unit.value().copied())?;
         positive("height_u", input.height_u.value().copied())?;
-        found(
-            Repository::update_device(tx, id, input).await?,
-            "device",
-            id,
-        )
+        found(Repository::update_device(tx, id, input).await?, "device", id)
     }
     pub async fn decommission_device(&self, id: Uuid) -> Result<Device> {
-        self.retryable_transaction(|tx| Box::pin(Self::decommission_device_in(tx, id)))
-            .await
+        self.mutation(EntityType::Devices, Some(id), Action::Decommission, vec![], move |tx| {
+            Box::pin(Self::decommission_device_in(tx, id))
+        })
+        .await
     }
-    pub async fn decommission_device_in(
-        tx: &mut Transaction<'_, Postgres>,
-        id: Uuid,
-    ) -> Result<Device> {
+    pub async fn decommission_device_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Device> {
         // Keep physical placement; removing occupancy is an explicit PATCH.
         found(Repository::decommission_device(tx, id).await?, "device", id)
     }
 
     pub async fn create_interface(&self, input: CreateInterface) -> Result<Interface> {
-        self.retryable_transaction(|tx| {
-            let input = input.clone();
-            Box::pin(async move { Self::create_interface_in(tx, &input).await })
-        })
+        self.mutation(
+            EntityType::Interfaces,
+            None,
+            Action::Create,
+            manual_fields(&[
+                ("if_index", input.if_index.is_some()),
+                ("name", true),
+                ("description", input.description.is_some()),
+                ("interface_type", input.interface_type.is_some()),
+                ("mac_address", input.mac_address.is_some()),
+            ]),
+            move |tx| {
+                let input = input.clone();
+                Box::pin(async move { Self::create_interface_in(tx, &input).await })
+            },
+        )
         .await
     }
-    pub async fn create_interface_in(
-        tx: &mut Transaction<'_, Postgres>,
-        input: &CreateInterface,
-    ) -> Result<Interface> {
+    pub async fn create_interface_in(tx: &mut Transaction<'_, Postgres>, input: &CreateInterface) -> Result<Interface> {
         validate_name(&input.name)?;
         positive("if_index", input.if_index)?;
         Repository::create_interface(tx, input).await
     }
     pub async fn get_interface(&self, id: Uuid) -> Result<Interface> {
-        found(
-            Repository::get_interface(&mut *self.pool.acquire().await?, id).await?,
-            "interface",
-            id,
-        )
+        found(Repository::get_interface(&mut *self.pool.acquire().await?, id).await?, "interface", id)
     }
     pub async fn list_interfaces(&self, device_id: Uuid) -> Result<Vec<Interface>> {
-        self.list_interfaces_page(device_id, Pagination::default())
-            .await
+        self.list_interfaces_page(device_id, Pagination::default()).await
     }
-    pub async fn list_interfaces_page(
-        &self,
-        device_id: Uuid,
-        page: Pagination,
-    ) -> Result<Vec<Interface>> {
+    pub async fn list_interfaces_page(&self, device_id: Uuid, page: Pagination) -> Result<Vec<Interface>> {
         page.validate()?;
         Repository::list_interfaces(&mut *self.pool.acquire().await?, device_id, page).await
     }
     pub async fn update_interface(&self, id: Uuid, input: UpdateInterface) -> Result<Interface> {
-        self.retryable_transaction(|tx| {
-            let input = input.clone();
-            Box::pin(async move { Self::update_interface_in(tx, id, &input).await })
-        })
+        self.mutation(
+            EntityType::Interfaces,
+            Some(id),
+            Action::Update,
+            manual_fields(&[
+                ("if_index", input.if_index.is_changed()),
+                ("name", input.name.is_changed()),
+                ("description", input.description.is_changed()),
+                ("interface_type", input.interface_type.is_changed()),
+                ("mac_address", input.mac_address.is_changed()),
+            ]),
+            move |tx| {
+                let input = input.clone();
+                Box::pin(async move { Self::update_interface_in(tx, id, &input).await })
+            },
+        )
         .await
     }
     pub async fn update_interface_in(
@@ -373,22 +353,20 @@ impl Service {
         required(&input.device_id, "device_id")?;
         validate_name_patch(&input.name)?;
         positive("if_index", input.if_index.value().copied())?;
-        found(
-            Repository::update_interface(tx, id, input).await?,
-            "interface",
-            id,
-        )
+        found(Repository::update_interface(tx, id, input).await?, "interface", id)
     }
     pub async fn delete_interface(&self, id: Uuid) -> Result<()> {
-        self.retryable_transaction(|tx| Box::pin(Self::delete_interface_in(tx, id)))
-            .await
+        self.mutation(EntityType::Interfaces, Some(id), Action::Delete, vec![], move |tx| {
+            Box::pin(Self::delete_interface_in(tx, id))
+        })
+        .await
     }
     pub async fn delete_interface_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<()> {
         deleted(Repository::delete_interface(tx, id).await?, "interface", id)
     }
 
     pub async fn create_ip_address(&self, input: CreateIpAddress) -> Result<IpAddress> {
-        self.retryable_transaction(|tx| {
+        self.mutation(EntityType::IpAddresses, None, Action::Create, manual_fields(&[("address", true)]), move |tx| {
             let input = input.clone();
             Box::pin(async move { Self::create_ip_address_in(tx, &input).await })
         })
@@ -401,29 +379,26 @@ impl Service {
         Repository::create_ip_address(tx, input).await
     }
     pub async fn get_ip_address(&self, id: Uuid) -> Result<IpAddress> {
-        found(
-            Repository::get_ip_address(&mut *self.pool.acquire().await?, id).await?,
-            "IP address",
-            id,
-        )
+        found(Repository::get_ip_address(&mut *self.pool.acquire().await?, id).await?, "IP address", id)
     }
     pub async fn list_ip_addresses(&self, interface_id: Uuid) -> Result<Vec<IpAddress>> {
-        self.list_ip_addresses_page(interface_id, Pagination::default())
-            .await
+        self.list_ip_addresses_page(interface_id, Pagination::default()).await
     }
-    pub async fn list_ip_addresses_page(
-        &self,
-        interface_id: Uuid,
-        page: Pagination,
-    ) -> Result<Vec<IpAddress>> {
+    pub async fn list_ip_addresses_page(&self, interface_id: Uuid, page: Pagination) -> Result<Vec<IpAddress>> {
         page.validate()?;
         Repository::list_ip_addresses(&mut *self.pool.acquire().await?, interface_id, page).await
     }
     pub async fn update_ip_address(&self, id: Uuid, input: UpdateIpAddress) -> Result<IpAddress> {
-        self.retryable_transaction(|tx| {
-            let input = input.clone();
-            Box::pin(async move { Self::update_ip_address_in(tx, id, &input).await })
-        })
+        self.mutation(
+            EntityType::IpAddresses,
+            Some(id),
+            Action::Update,
+            manual_fields(&[("address", input.address.is_changed())]),
+            move |tx| {
+                let input = input.clone();
+                Box::pin(async move { Self::update_ip_address_in(tx, id, &input).await })
+            },
+        )
         .await
     }
     pub async fn update_ip_address_in(
@@ -434,22 +409,16 @@ impl Service {
         required(&input.interface_id, "interface_id")?;
         required(&input.address, "address")?;
         required(&input.is_management, "is_management")?;
-        found(
-            Repository::update_ip_address(tx, id, input).await?,
-            "IP address",
-            id,
-        )
+        found(Repository::update_ip_address(tx, id, input).await?, "IP address", id)
     }
     pub async fn delete_ip_address(&self, id: Uuid) -> Result<()> {
-        self.retryable_transaction(|tx| Box::pin(Self::delete_ip_address_in(tx, id)))
-            .await
+        self.mutation(EntityType::IpAddresses, Some(id), Action::Delete, vec![], move |tx| {
+            Box::pin(Self::delete_ip_address_in(tx, id))
+        })
+        .await
     }
     pub async fn delete_ip_address_in(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<()> {
-        deleted(
-            Repository::delete_ip_address(tx, id).await?,
-            "IP address",
-            id,
-        )
+        deleted(Repository::delete_ip_address(tx, id).await?, "IP address", id)
     }
 
     pub async fn is_field_overridden(
@@ -459,13 +428,7 @@ impl Service {
         field_name: &str,
     ) -> Result<bool> {
         validate_name(field_name)?;
-        Repository::is_field_overridden(
-            &mut *self.pool.acquire().await?,
-            entity_type,
-            entity_id,
-            field_name,
-        )
-        .await
+        Repository::is_field_overridden(&mut *self.pool.acquire().await?, entity_type, entity_id, field_name).await
     }
     pub async fn is_field_overridden_in(
         tx: &mut Transaction<'_, Postgres>,
@@ -490,9 +453,7 @@ fn deleted(value: bool, entity: &'static str, id: Uuid) -> Result<()> {
 }
 fn validate_name(value: &str) -> Result<()> {
     if value.trim().is_empty() {
-        Err(Error::validation(
-            "Name must contain a non-whitespace character",
-        ))
+        Err(Error::validation("Name must contain a non-whitespace character"))
     } else {
         Ok(())
     }

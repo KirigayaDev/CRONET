@@ -4,16 +4,19 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+# Keep this package standalone until the stage 5 workspace integration decision.
+[workspace]
+
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "signal", "sync"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "derive", "uuid", "chrono", "ipnetwork", "mac_address"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "derive", "uuid", "chrono", "ipnetwork", "mac_address", "json"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 ipnetwork = { version = "0.20", features = ["serde"] }
 mac_address = { version = "1.1", features = ["serde"] }
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
@@ -27,6 +30,7 @@ tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = "1"
+csv = "1"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

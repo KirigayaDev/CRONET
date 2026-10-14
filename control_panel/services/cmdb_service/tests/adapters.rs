@@ -50,11 +50,7 @@ async fn every_data_route_authenticates_and_every_write_requires_admin() {
                 continue;
             }
             let verb = method.to_uppercase();
-            assert_eq!(
-                request(&app, &verb, &path, None, None).await.0,
-                StatusCode::UNAUTHORIZED,
-                "{verb} {path}"
-            );
+            assert_eq!(request(&app, &verb, &path, None, None).await.0, StatusCode::UNAUTHORIZED, "{verb} {path}");
             if verb != "GET" {
                 assert_eq!(
                     request(&app, &verb, &path, Some(&f.reader), None).await.0,
@@ -70,19 +66,13 @@ async fn every_data_route_authenticates_and_every_write_requires_admin() {
 async fn pagination_is_sql_bounded_for_all_six_entities() {
     let pool = test_pool().await;
     let mut tx = pool.begin().await.unwrap();
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *tx)
-        .await
-        .unwrap();
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ").execute(&mut *tx).await.unwrap();
     let marker = Uuid::new_v4();
     let mut site = None;
     for i in 0..60 {
         let value = Service::create_site_in(
             &mut tx,
-            &CreateSite {
-                name: format!("zz-page-{marker}-{i:02}"),
-                description: None,
-            },
+            &CreateSite { name: format!("zz-page-{marker}-{i:02}"), description: None },
         )
         .await
         .unwrap();
@@ -90,91 +80,46 @@ async fn pagination_is_sql_bounded_for_all_six_entities() {
     }
     let site = site.unwrap();
     let small = Pagination::new(2, 1).unwrap();
-    let full = Repository::list_sites(&mut tx, Pagination::new(200, 0).unwrap())
-        .await
-        .unwrap();
+    let full = Repository::list_sites(&mut tx, Pagination::new(200, 0).unwrap()).await.unwrap();
     let subset = Repository::list_sites(&mut tx, small).await.unwrap();
-    assert_eq!(
-        subset.iter().map(|v| v.id).collect::<Vec<_>>(),
-        full[1..3].iter().map(|v| v.id).collect::<Vec<_>>()
-    );
-    assert_eq!(
-        Repository::list_sites(&mut tx, Pagination::default())
-            .await
-            .unwrap()
-            .len(),
-        50
-    );
+    assert_eq!(subset.iter().map(|v| v.id).collect::<Vec<_>>(), full[1..3].iter().map(|v| v.id).collect::<Vec<_>>());
+    assert_eq!(Repository::list_sites(&mut tx, Pagination::default()).await.unwrap().len(), 50);
     let mut room = None;
     for i in 0..3 {
         room = Some(
             Service::create_room_in(
                 &mut tx,
-                &CreateRoom {
-                    site_id: site.id,
-                    name: format!("Room {i}"),
-                    description: None,
-                },
+                &CreateRoom { site_id: site.id, name: format!("Room {i}"), description: None },
             )
             .await
             .unwrap(),
         );
     }
-    assert_eq!(
-        Repository::list_rooms(&mut tx, Some(site.id), small)
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(Repository::list_rooms(&mut tx, Some(site.id), small).await.unwrap().len(), 2);
     let room = room.unwrap();
     for i in 0..3 {
         Service::create_rack_in(
             &mut tx,
-            &CreateRack {
-                room_id: room.id,
-                name: format!("Rack {i}"),
-                height_u: 42,
-                description: None,
-            },
+            &CreateRack { room_id: room.id, name: format!("Rack {i}"), height_u: 42, description: None },
         )
         .await
         .unwrap();
     }
-    assert_eq!(
-        Repository::list_racks(&mut tx, Some(room.id), small)
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(Repository::list_racks(&mut tx, Some(room.id), small).await.unwrap().len(), 2);
     let host = format!("page-{marker}");
     let mut device = None;
     for _ in 0..3 {
         device = Some(
-            Service::create_device_in(
-                &mut tx,
-                &CreateDevice {
-                    hostname: Some(host.clone()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap(),
+            Service::create_device_in(&mut tx, &CreateDevice { hostname: Some(host.clone()), ..Default::default() })
+                .await
+                .unwrap(),
         );
     }
     assert_eq!(
-        Repository::list_devices(
-            &mut tx,
-            &DeviceFilter {
-                hostname: Some(host),
-                ..Default::default()
-            },
-            small
-        )
-        .await
-        .unwrap()
-        .len(),
+        Repository::list_devices(&mut tx, &DeviceFilter { hostname: Some(host), ..Default::default() }, small)
+            .await
+            .unwrap()
+            .len(),
         2
     );
     let device = device.unwrap();
@@ -196,13 +141,7 @@ async fn pagination_is_sql_bounded_for_all_six_entities() {
             .unwrap(),
         );
     }
-    assert_eq!(
-        Repository::list_interfaces(&mut tx, device.id, small)
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(Repository::list_interfaces(&mut tx, device.id, small).await.unwrap().len(), 2);
     let interface = interface.unwrap();
     for i in 1..=3 {
         Service::create_ip_address_in(
@@ -216,19 +155,10 @@ async fn pagination_is_sql_bounded_for_all_six_entities() {
         .await
         .unwrap();
     }
-    assert_eq!(
-        Repository::list_ip_addresses(&mut tx, interface.id, small)
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
+    assert_eq!(Repository::list_ip_addresses(&mut tx, interface.id, small).await.unwrap().len(), 2);
     tx.rollback().await.unwrap();
     let invalid: Pagination = serde_json::from_value(json!({"limit":0,"offset":-1})).unwrap();
-    assert!(matches!(
-        Service::new(pool).list_sites_page(invalid).await,
-        Err(Error::Validation(_))
-    ));
+    assert!(matches!(Service::new(pool).list_sites_page(invalid).await, Err(Error::Validation(_))));
 }
 
 const CONTRACT: &str = "Re:simple_videohosting_auth";
@@ -244,21 +174,11 @@ fn generate_keys() -> Keys {
     let private_path = dir.path().join("private.pem");
     let public_path = dir.path().join("public.pem");
     let output = Command::new("openssl")
-        .args([
-            "genpkey",
-            "-algorithm",
-            "RSA",
-            "-pkeyopt",
-            "rsa_keygen_bits:2048",
-            "-out",
-        ])
+        .args(["genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out"])
         .arg(&private_path)
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "Ephemeral test key generation failed"
-    );
+    assert!(output.status.success(), "Ephemeral test key generation failed");
     let output = Command::new("openssl")
         .args(["pkey", "-pubout", "-in"])
         .arg(&private_path)
@@ -266,17 +186,9 @@ fn generate_keys() -> Keys {
         .arg(&public_path)
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "Ephemeral test public key generation failed"
-    );
+    assert!(output.status.success(), "Ephemeral test public key generation failed");
     let private = EncodingKey::from_rsa_pem(&std::fs::read(private_path).unwrap()).unwrap();
-    Keys {
-        _dir: dir,
-        public: std::fs::read(&public_path).unwrap(),
-        public_path,
-        private,
-    }
+    Keys { _dir: dir, public: std::fs::read(&public_path).unwrap(), public_path, private }
 }
 fn keys() -> &'static Keys {
     static KEYS: OnceLock<Keys> = OnceLock::new();
@@ -297,18 +209,10 @@ async fn test_pool() -> PgPool {
         Some("cronet_cmdb_test_schema"),
         "Refusing a non-test DB"
     );
-    let pool = db::connect(&Config::from_database_url(&url).unwrap())
-        .await
-        .unwrap();
-    let name: String = sqlx::query_scalar("SELECT current_database()")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let pool = db::connect(&Config::from_database_url(&url).unwrap()).await.unwrap();
+    let name: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&pool).await.unwrap();
     assert_eq!(name, "cronet_cmdb_test_schema");
-    let head: String = sqlx::query_scalar("SELECT version_num FROM alembic_version")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let head: String = sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_one(&pool).await.unwrap();
     assert_eq!(head, "8b6e2f4a9c10");
     pool
 }
@@ -329,10 +233,7 @@ async fn user(pool: &PgPool, admin: bool, super_admin: bool) -> AccessClaims {
     .fetch_one(pool)
     .await
     .unwrap();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
     AccessClaims {
         iss: CONTRACT.into(),
         sub,
@@ -359,16 +260,7 @@ async fn fixture() -> Fixture {
     let reader = sign(&user(&pool, false, false).await);
     let admin = sign(&user(&pool, true, false).await);
     let super_admin = sign(&user(&pool, false, true).await);
-    Fixture {
-        pool: pool.clone(),
-        state: ApiState {
-            service: Service::new(pool),
-            auth,
-        },
-        reader,
-        admin,
-        super_admin,
-    }
+    Fixture { pool: pool.clone(), state: ApiState { service: Service::new(pool), auth }, reader, admin, super_admin }
 }
 async fn request(
     app: &Router,
@@ -387,51 +279,25 @@ async fn request(
     } else {
         Body::empty()
     };
-    let response = app
-        .clone()
-        .oneshot(builder.body(body).unwrap())
-        .await
-        .unwrap();
+    let response = app.clone().oneshot(builder.body(body).unwrap()).await.unwrap();
     let status = response.status();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    let json = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap()
-    };
+    let json = if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() };
     (status, json)
 }
 async fn location(service: &Service) -> Rack {
-    let site = service
-        .create_site(CreateSite {
-            name: format!("API {}", Uuid::new_v4()),
-            description: None,
-        })
-        .await
-        .unwrap();
-    let room = service
-        .create_room(CreateRoom {
-            site_id: site.id,
-            name: "Room A".into(),
-            description: None,
-        })
-        .await
-        .unwrap();
+    let site =
+        service.create_site(CreateSite { name: format!("API {}", Uuid::new_v4()), description: None }).await.unwrap();
+    let room =
+        service.create_room(CreateRoom { site_id: site.id, name: "Room A".into(), description: None }).await.unwrap();
     service
-        .create_rack(CreateRack {
-            room_id: room.id,
-            name: "Rack A".into(),
-            height_u: 42,
-            description: None,
-        })
+        .create_rack(CreateRack { room_id: room.id, name: "Rack A".into(), height_u: 42, description: None })
         .await
         .unwrap()
 }
 fn auth_request<T>(value: T, token: &str) -> tonic::Request<T> {
     let mut request = tonic::Request::new(value);
-    request
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {token}").parse().unwrap());
+    request.metadata_mut().insert("authorization", format!("Bearer {token}").parse().unwrap());
     request
 }
 
@@ -439,38 +305,18 @@ fn auth_request<T>(value: T, token: &str) -> tonic::Request<T> {
 async fn auth_accepts_fractional_python_timestamps_and_rejects_invalid_tokens() {
     let pool = test_pool().await;
     let redis = auth::connect_redis(&redis_url()).await.unwrap();
-    let verifier =
-        Authenticator::new(pool.clone(), redis, &keys().public, CONTRACT, CONTRACT).unwrap();
+    let verifier = Authenticator::new(pool.clone(), redis, &keys().public, CONTRACT, CONTRACT).unwrap();
     let good = user(&pool, false, false).await;
-    let principal = verifier
-        .authenticate(Some(&format!("Bearer {}", sign(&good))))
-        .await
-        .unwrap();
+    let principal = verifier.authenticate(Some(&format!("Bearer {}", sign(&good)))).await.unwrap();
     assert_eq!(principal.user_id, good.sub);
-    for header in [
-        None,
-        Some(""),
-        Some("Basic value"),
-        Some("Bearer"),
-        Some("Bearer malformed"),
-        Some("Bearer one two"),
-    ] {
-        assert_eq!(
-            verifier.authenticate(header).await,
-            Err(AuthError::Unauthorized)
-        );
+    for header in
+        [None, Some(""), Some("Basic value"), Some("Bearer"), Some("Bearer malformed"), Some("Bearer one two")]
+    {
+        assert_eq!(verifier.authenticate(header).await, Err(AuthError::Unauthorized));
     }
-    for case in [
-        "expired",
-        "future_nbf",
-        "future_iat",
-        "audience",
-        "issuer",
-        "refresh",
-        "csrf",
-        "version",
-        "nonexistent_user",
-    ] {
+    for case in
+        ["expired", "future_nbf", "future_iat", "audience", "issuer", "refresh", "csrf", "version", "nonexistent_user"]
+    {
         let mut value = good.clone();
         match case {
             "expired" => value.exp = value.iat - 120.0,
@@ -485,51 +331,25 @@ async fn auth_accepts_fractional_python_timestamps_and_rejects_invalid_tokens() 
             _ => unreachable!(),
         }
         assert_eq!(
-            verifier
-                .authenticate(Some(&format!("Bearer {}", sign(&value))))
-                .await,
+            verifier.authenticate(Some(&format!("Bearer {}", sign(&value)))).await,
             Err(AuthError::Unauthorized),
             "case {case}"
         );
     }
     let wrong = encode(&Header::new(Algorithm::RS256), &good, &wrong_keys().private).unwrap();
-    assert_eq!(
-        verifier
-            .authenticate(Some(&format!("Bearer {wrong}")))
-            .await,
-        Err(AuthError::Unauthorized)
-    );
+    assert_eq!(verifier.authenticate(Some(&format!("Bearer {wrong}"))).await, Err(AuthError::Unauthorized));
     let secret = Uuid::new_v4();
-    let wrong_alg = encode(
-        &Header::new(Algorithm::HS256),
-        &good,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .unwrap();
-    assert_eq!(
-        verifier
-            .authenticate(Some(&format!("Bearer {wrong_alg}")))
-            .await,
-        Err(AuthError::Unauthorized)
-    );
+    let wrong_alg =
+        encode(&Header::new(Algorithm::HS256), &good, &EncodingKey::from_secret(secret.as_bytes())).unwrap();
+    assert_eq!(verifier.authenticate(Some(&format!("Bearer {wrong_alg}"))).await, Err(AuthError::Unauthorized));
     for field in ["sub", "jti", "token_version", "exp", "nbf", "iat"] {
         let mut value = serde_json::to_value(&good).unwrap();
         value[field] = json!("invalid");
         let token = encode(&Header::new(Algorithm::RS256), &value, &keys().private).unwrap();
-        assert_eq!(
-            verifier
-                .authenticate(Some(&format!("Bearer {token}")))
-                .await,
-            Err(AuthError::Unauthorized)
-        );
+        assert_eq!(verifier.authenticate(Some(&format!("Bearer {token}"))).await, Err(AuthError::Unauthorized));
         value.as_object_mut().unwrap().remove(field);
         let token = encode(&Header::new(Algorithm::RS256), &value, &keys().private).unwrap();
-        assert_eq!(
-            verifier
-                .authenticate(Some(&format!("Bearer {token}")))
-                .await,
-            Err(AuthError::Unauthorized)
-        );
+        assert_eq!(verifier.authenticate(Some(&format!("Bearer {token}"))).await, Err(AuthError::Unauthorized));
     }
 }
 
@@ -537,14 +357,7 @@ async fn auth_accepts_fractional_python_timestamps_and_rejects_invalid_tokens() 
 async fn auth_blacklist_and_live_token_version_are_enforced() {
     let pool = test_pool().await;
     let mut redis = auth::connect_redis(&redis_url()).await.unwrap();
-    let verifier = Authenticator::new(
-        pool.clone(),
-        redis.clone(),
-        &keys().public,
-        CONTRACT,
-        CONTRACT,
-    )
-    .unwrap();
+    let verifier = Authenticator::new(pool.clone(), redis.clone(), &keys().public, CONTRACT, CONTRACT).unwrap();
     let claims = user(&pool, true, false).await;
     let token = format!("Bearer {}", sign(&claims));
     assert!(verifier.authenticate(Some(&token)).await.is_ok());
@@ -556,10 +369,7 @@ async fn auth_blacklist_and_live_token_version_are_enforced() {
         .query_async::<()>(&mut redis)
         .await
         .unwrap();
-    assert_eq!(
-        verifier.authenticate(Some(&token)).await,
-        Err(AuthError::Unauthorized)
-    );
+    assert_eq!(verifier.authenticate(Some(&token)).await, Err(AuthError::Unauthorized));
     let claims = user(&pool, true, false).await;
     let token = format!("Bearer {}", sign(&claims));
     sqlx::query("UPDATE users SET token_version_uuid=$1 WHERE uuid=$2")
@@ -568,37 +378,24 @@ async fn auth_blacklist_and_live_token_version_are_enforced() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        verifier.authenticate(Some(&token)).await,
-        Err(AuthError::Unauthorized)
-    );
+    assert_eq!(verifier.authenticate(Some(&token)).await, Err(AuthError::Unauthorized));
 }
 
 #[tokio::test]
 async fn auth_rejects_invalid_and_private_keys() {
     let pool = test_pool().await;
     let redis = auth::connect_redis(&redis_url()).await.unwrap();
-    assert!(
-        Authenticator::new(pool.clone(), redis.clone(), b"invalid", CONTRACT, CONTRACT).is_err()
-    );
+    assert!(Authenticator::new(pool.clone(), redis.clone(), b"invalid", CONTRACT, CONTRACT).is_err());
     let private_pem = std::fs::read(keys()._dir.path().join("private.pem")).unwrap();
     assert!(Authenticator::new(pool, redis, &private_pem, CONTRACT, CONTRACT).is_err());
-    assert!(
-        auth::load_public_key(std::path::Path::new("/tmp/nonexistent-cmdb-public-key.pem"))
-            .is_err()
-    );
+    assert!(auth::load_public_key(std::path::Path::new("/tmp/nonexistent-cmdb-public-key.pem")).is_err());
 }
 
 #[tokio::test]
 async fn http_read_and_write_authorization_uses_actual_user_flags() {
     let f = fixture().await;
     let app = api::http::router(f.state.clone());
-    assert_eq!(
-        request(&app, "GET", "/api/v1/cmdb/sites", Some(&f.reader), None)
-            .await
-            .0,
-        StatusCode::OK
-    );
+    assert_eq!(request(&app, "GET", "/api/v1/cmdb/sites", Some(&f.reader), None).await.0, StatusCode::OK);
     for method in ["POST", "PATCH", "DELETE"] {
         let path = if method == "POST" {
             "/api/v1/cmdb/sites".into()
@@ -606,28 +403,14 @@ async fn http_read_and_write_authorization_uses_actual_user_flags() {
             format!("/api/v1/cmdb/sites/{}", Uuid::new_v4())
         };
         assert_eq!(
-            request(
-                &app,
-                method,
-                &path,
-                Some(&f.reader),
-                Some(json!({"name":"forbidden"}))
-            )
-            .await
-            .0,
+            request(&app, method, &path, Some(&f.reader), Some(json!({"name":"forbidden"}))).await.0,
             StatusCode::FORBIDDEN
         );
     }
     assert_eq!(
-        request(
-            &app,
-            "POST",
-            &format!("/api/v1/cmdb/devices/{}/decommission", Uuid::new_v4()),
-            Some(&f.reader),
-            None
-        )
-        .await
-        .0,
+        request(&app, "POST", &format!("/api/v1/cmdb/devices/{}/decommission", Uuid::new_v4()), Some(&f.reader), None)
+            .await
+            .0,
         StatusCode::FORBIDDEN
     );
     for token in [&f.admin, &f.super_admin] {
@@ -641,26 +424,12 @@ async fn http_read_and_write_authorization_uses_actual_user_flags() {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         let path = format!("/api/v1/cmdb/sites/{}", site["id"].as_str().unwrap());
+        assert_eq!(request(&app, "GET", &path, Some(token), None).await.0, StatusCode::OK);
         assert_eq!(
-            request(&app, "GET", &path, Some(token), None).await.0,
+            request(&app, "PATCH", &path, Some(token), Some(json!({"description":"updated"}))).await.0,
             StatusCode::OK
         );
-        assert_eq!(
-            request(
-                &app,
-                "PATCH",
-                &path,
-                Some(token),
-                Some(json!({"description":"updated"}))
-            )
-            .await
-            .0,
-            StatusCode::OK
-        );
-        assert_eq!(
-            request(&app, "DELETE", &path, Some(token), None).await.0,
-            StatusCode::NO_CONTENT
-        );
+        assert_eq!(request(&app, "DELETE", &path, Some(token), None).await.0, StatusCode::NO_CONTENT);
     }
 }
 
@@ -669,106 +438,38 @@ async fn http_sites_pagination_validation_and_error_shapes() {
     let f = fixture().await;
     let app = api::http::router(f.state.clone());
     let name = format!("HTTP {}", Uuid::new_v4());
-    let (status, site) = request(
-        &app,
-        "POST",
-        "/api/v1/cmdb/sites",
-        Some(&f.admin),
-        Some(json!({"name":name,"description":"before"})),
-    )
-    .await;
+    let (status, site) =
+        request(&app, "POST", "/api/v1/cmdb/sites", Some(&f.admin), Some(json!({"name":name,"description":"before"})))
+            .await;
     assert_eq!(status, StatusCode::CREATED);
     let path = format!("/api/v1/cmdb/sites/{}", site["id"].as_str().unwrap());
+    assert_eq!(request(&app, "GET", &path, Some(&f.reader), None).await.1["description"], "before");
     assert_eq!(
-        request(&app, "GET", &path, Some(&f.reader), None).await.1["description"],
-        "before"
-    );
-    assert_eq!(
-        request(
-            &app,
-            "PATCH",
-            &path,
-            Some(&f.admin),
-            Some(json!({"description":null}))
-        )
-        .await
-        .1["description"],
+        request(&app, "PATCH", &path, Some(&f.admin), Some(json!({"description":null}))).await.1["description"],
         Value::Null
     );
-    let (status, body) = request(
-        &app,
-        "GET",
-        "/api/v1/cmdb/sites?limit=1&offset=0",
-        Some(&f.reader),
-        None,
-    )
-    .await;
+    let (status, body) = request(&app, "GET", "/api/v1/cmdb/sites?limit=1&offset=0", Some(&f.reader), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap().len(), 1);
-    for query in [
-        "limit=0",
-        "limit=-1",
-        "limit=201",
-        "offset=-1",
-        "limit=invalid",
-    ] {
-        let (status, body) = request(
-            &app,
-            "GET",
-            &format!("/api/v1/cmdb/sites?{query}"),
-            Some(&f.reader),
-            None,
-        )
-        .await;
+    for query in ["limit=0", "limit=-1", "limit=201", "offset=-1", "limit=invalid"] {
+        let (status, body) = request(&app, "GET", &format!("/api/v1/cmdb/sites?{query}"), Some(&f.reader), None).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "validation");
     }
     assert_eq!(
-        request(
-            &app,
-            "GET",
-            &format!("/api/v1/cmdb/sites/{}", Uuid::new_v4()),
-            Some(&f.reader),
-            None
-        )
-        .await
-        .0,
+        request(&app, "GET", &format!("/api/v1/cmdb/sites/{}", Uuid::new_v4()), Some(&f.reader), None).await.0,
         StatusCode::NOT_FOUND
     );
     assert_eq!(
-        request(
-            &app,
-            "GET",
-            "/api/v1/cmdb/sites/not-a-uuid",
-            Some(&f.reader),
-            None
-        )
-        .await
-        .0,
+        request(&app, "GET", "/api/v1/cmdb/sites/not-a-uuid", Some(&f.reader), None).await.0,
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        request(
-            &app,
-            "POST",
-            "/api/v1/cmdb/sites",
-            Some(&f.admin),
-            Some(json!({"name":name.to_uppercase()}))
-        )
-        .await
-        .0,
+        request(&app, "POST", "/api/v1/cmdb/sites", Some(&f.admin), Some(json!({"name":name.to_uppercase()}))).await.0,
         StatusCode::CONFLICT
     );
     assert_eq!(
-        request(
-            &app,
-            "POST",
-            "/api/v1/cmdb/sites",
-            Some(&f.admin),
-            Some(json!({"name":" \t "}))
-        )
-        .await
-        .0,
+        request(&app, "POST", "/api/v1/cmdb/sites", Some(&f.admin), Some(json!({"name":" \t "}))).await.0,
         StatusCode::BAD_REQUEST
     );
     let req = HttpRequest::builder()
@@ -784,26 +485,13 @@ async fn http_sites_pagination_validation_and_error_shapes() {
     assert!(!String::from_utf8_lossy(&bytes).contains("sensitive-payload-marker"));
     let response = app
         .clone()
-        .oneshot(
-            HttpRequest::builder()
-                .uri("/api/v1/cmdb/sites")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(HttpRequest::builder().uri("/api/v1/cmdb/sites").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(response.headers()["www-authenticate"], "Bearer");
     assert_eq!(
-        request(
-            &app,
-            "GET",
-            &format!("/api/v1/cmdb/sites?access_token={}", f.reader),
-            None,
-            None
-        )
-        .await
-        .0,
+        request(&app, "GET", &format!("/api/v1/cmdb/sites?access_token={}", f.reader), None, None).await.0,
         StatusCode::UNAUTHORIZED
     );
 }
@@ -839,11 +527,7 @@ async fn http_location_filters_and_full_device_network_flow() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     for (path, id) in [("rooms", &site["id"]), ("racks", &room["id"])] {
-        let param = if path == "rooms" {
-            "site_id"
-        } else {
-            "room_id"
-        };
+        let param = if path == "rooms" { "site_id" } else { "room_id" };
         assert_eq!(
             request(
                 &app,
@@ -873,48 +557,48 @@ async fn http_location_filters_and_full_device_network_flow() {
         .is_empty());
     }
     let host = format!("host-{}", Uuid::new_v4());
-    let (status,device)=request(&app,"POST","/api/v1/cmdb/devices",Some(&f.admin),Some(json!({"rack_id":rack["id"],"start_unit":1,"height_u":2,"hostname":host,"serial":"exact-serial"}))).await;
+    let (status, device) = request(
+        &app,
+        "POST",
+        "/api/v1/cmdb/devices",
+        Some(&f.admin),
+        Some(json!({"rack_id":rack["id"],"start_unit":1,"height_u":2,"hostname":host,"serial":"exact-serial"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
     let dp = format!("/api/v1/cmdb/devices/{}", device["id"].as_str().unwrap());
+    assert_eq!(request(&app, "GET", &dp, Some(&f.reader), None).await.0, StatusCode::OK);
     assert_eq!(
-        request(&app, "GET", &dp, Some(&f.reader), None).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        request(
-            &app,
-            "PATCH",
-            &dp,
-            Some(&f.admin),
-            Some(json!({"lifecycle_status":"maintenance"}))
-        )
-        .await
-        .1["lifecycle_status"],
+        request(&app, "PATCH", &dp, Some(&f.admin), Some(json!({"lifecycle_status":"maintenance"}))).await.1
+            ["lifecycle_status"],
         "maintenance"
     );
-    assert_eq!(request(&app,"GET",&format!("/api/v1/cmdb/devices?hostname={host}&serial=exact-serial&lifecycle_status=maintenance&rack_id={}",rack["id"].as_str().unwrap()),Some(&f.reader),None).await.1.as_array().unwrap().len(),1);
-    assert!(request(
-        &app,
-        "GET",
-        &format!("/api/v1/cmdb/devices?hostname={}x", host),
-        Some(&f.reader),
-        None
-    )
-    .await
-    .1
-    .as_array()
-    .unwrap()
-    .is_empty());
     assert_eq!(
         request(
             &app,
-            "POST",
-            &format!("{dp}/decommission"),
-            Some(&f.admin),
+            "GET",
+            &format!(
+                "/api/v1/cmdb/devices?hostname={host}&serial=exact-serial&lifecycle_status=maintenance&rack_id={}",
+                rack["id"].as_str().unwrap()
+            ),
+            Some(&f.reader),
             None
         )
         .await
-        .1["lifecycle_status"],
+        .1
+        .as_array()
+        .unwrap()
+        .len(),
+        1
+    );
+    assert!(request(&app, "GET", &format!("/api/v1/cmdb/devices?hostname={}x", host), Some(&f.reader), None)
+        .await
+        .1
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        request(&app, "POST", &format!("{dp}/decommission"), Some(&f.admin), None).await.1["lifecycle_status"],
         "decommissioned"
     );
     assert_eq!(
@@ -929,44 +613,31 @@ async fn http_location_filters_and_full_device_network_flow() {
         .0,
         StatusCode::CONFLICT
     );
-    let (status,interface)=request(&app,"POST","/api/v1/cmdb/interfaces",Some(&f.admin),Some(json!({"device_id":device["id"],"name":"eth0","if_index":1,"mac_address":"aa:bb:cc:dd:ee:ff"}))).await;
+    let (status, interface) = request(
+        &app,
+        "POST",
+        "/api/v1/cmdb/interfaces",
+        Some(&f.admin),
+        Some(json!({"device_id":device["id"],"name":"eth0","if_index":1,"mac_address":"aa:bb:cc:dd:ee:ff"})),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED);
-    let ipath = format!(
-        "/api/v1/cmdb/interfaces/{}",
-        interface["id"].as_str().unwrap()
-    );
+    let ipath = format!("/api/v1/cmdb/interfaces/{}", interface["id"].as_str().unwrap());
     assert_eq!(
-        request(
-            &app,
-            "GET",
-            &format!("{dp}/interfaces?limit=1"),
-            Some(&f.reader),
-            None
-        )
-        .await
-        .1
-        .as_array()
-        .unwrap()
-        .len(),
+        request(&app, "GET", &format!("{dp}/interfaces?limit=1"), Some(&f.reader), None)
+            .await
+            .1
+            .as_array()
+            .unwrap()
+            .len(),
         1
     );
     assert_eq!(
-        request(&app, "GET", &ipath, Some(&f.reader), None).await.1["mac_address"]
-            .as_str()
-            .unwrap()
-            .to_lowercase(),
+        request(&app, "GET", &ipath, Some(&f.reader), None).await.1["mac_address"].as_str().unwrap().to_lowercase(),
         "aa:bb:cc:dd:ee:ff"
     );
     assert_eq!(
-        request(
-            &app,
-            "PATCH",
-            &ipath,
-            Some(&f.admin),
-            Some(json!({"description":"uplink"}))
-        )
-        .await
-        .0,
+        request(&app, "PATCH", &ipath, Some(&f.admin), Some(json!({"description":"uplink"}))).await.0,
         StatusCode::OK
     );
     for address in ["192.0.2.1/24", "2001:db8::1/64"] {
@@ -980,45 +651,20 @@ async fn http_location_filters_and_full_device_network_flow() {
         .await;
         assert_eq!(status, StatusCode::CREATED);
         let path = format!("/api/v1/cmdb/ip-addresses/{}", ip["id"].as_str().unwrap());
+        assert_eq!(request(&app, "GET", &path, Some(&f.reader), None).await.1["address"], address);
         assert_eq!(
-            request(&app, "GET", &path, Some(&f.reader), None).await.1["address"],
-            address
-        );
-        assert_eq!(
-            request(
-                &app,
-                "PATCH",
-                &path,
-                Some(&f.admin),
-                Some(json!({"is_management":true}))
-            )
-            .await
-            .1["is_management"],
+            request(&app, "PATCH", &path, Some(&f.admin), Some(json!({"is_management":true}))).await.1["is_management"],
             true
         );
-        assert_eq!(
-            request(&app, "DELETE", &path, Some(&f.admin), None).await.0,
-            StatusCode::NO_CONTENT
-        );
+        assert_eq!(request(&app, "DELETE", &path, Some(&f.admin), None).await.0, StatusCode::NO_CONTENT);
     }
-    assert!(request(
-        &app,
-        "GET",
-        &format!("{ipath}/ip-addresses"),
-        Some(&f.reader),
-        None
-    )
-    .await
-    .1
-    .as_array()
-    .unwrap()
-    .is_empty());
-    assert_eq!(
-        request(&app, "DELETE", &ipath, Some(&f.admin), None)
-            .await
-            .0,
-        StatusCode::NO_CONTENT
-    );
+    assert!(request(&app, "GET", &format!("{ipath}/ip-addresses"), Some(&f.reader), None)
+        .await
+        .1
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(request(&app, "DELETE", &ipath, Some(&f.admin), None).await.0, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
@@ -1040,11 +686,8 @@ async fn openapi_documents_all_operations_security_and_patch_schemas() {
             }
         }
     }
-    assert_eq!(operations, 33);
-    assert_eq!(
-        spec["components"]["securitySchemes"]["bearer_jwt"]["scheme"],
-        "bearer"
-    );
+    assert_eq!(operations, 45);
+    assert_eq!(spec["components"]["securitySchemes"]["bearer_jwt"]["scheme"], "bearer");
     assert!(spec["components"]["schemas"]["UpdateDeviceDto"].is_object());
     assert!(spec["paths"]["/api/v1/cmdb/devices"]["get"]["parameters"]
         .as_array()
@@ -1052,10 +695,7 @@ async fn openapi_documents_all_operations_security_and_patch_schemas() {
         .iter()
         .any(|p| p["name"] == "limit"));
     let parsed: utoipa::openapi::OpenApi = serde_json::from_value(spec).unwrap();
-    assert_eq!(
-        parsed.paths.paths.len(),
-        ApiDoc::openapi().paths.paths.len()
-    );
+    assert_eq!(parsed.paths.paths.len(), ApiDoc::openapi().paths.paths.len());
 }
 
 #[tokio::test]
@@ -1063,20 +703,9 @@ async fn postgres_failure_is_auth_unavailable_readiness_fails_liveness_survives(
     let f = fixture().await;
     f.pool.close().await;
     let app = api::http::router(f.state.clone());
-    assert_eq!(
-        request(&app, "GET", "/health/live", None, None).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        request(&app, "GET", "/health/ready", None, None).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    assert_eq!(
-        request(&app, "GET", "/api/v1/cmdb/sites", Some(&f.reader), None)
-            .await
-            .1["code"],
-        "auth_unavailable"
-    );
+    assert_eq!(request(&app, "GET", "/health/live", None, None).await.0, StatusCode::OK);
+    assert_eq!(request(&app, "GET", "/health/ready", None, None).await.0, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(request(&app, "GET", "/api/v1/cmdb/sites", Some(&f.reader), None).await.1["code"], "auth_unavailable");
 }
 
 #[tokio::test]
@@ -1094,35 +723,15 @@ async fn redis_failure_is_auth_unavailable_and_never_authenticated() {
             });
         }
     });
-    let redis = auth::connect_redis(&format!("redis://{addr}"))
-        .await
-        .unwrap();
-    let verifier =
-        Authenticator::new(f.pool.clone(), redis, &keys().public, CONTRACT, CONTRACT).unwrap();
-    assert!(verifier
-        .authenticate(Some(&format!("Bearer {}", f.reader)))
-        .await
-        .is_ok());
+    let redis = auth::connect_redis(&format!("redis://{addr}")).await.unwrap();
+    let verifier = Authenticator::new(f.pool.clone(), redis, &keys().public, CONTRACT, CONTRACT).unwrap();
+    assert!(verifier.authenticate(Some(&format!("Bearer {}", f.reader))).await.is_ok());
     proxy.abort();
     let _ = proxy.await;
-    assert_eq!(
-        verifier
-            .authenticate(Some(&format!("Bearer {}", f.reader)))
-            .await,
-        Err(AuthError::Unavailable)
-    );
-    let app = api::http::router(ApiState {
-        service: f.state.service,
-        auth: verifier,
-    });
-    assert_eq!(
-        request(&app, "GET", "/health/live", None, None).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        request(&app, "GET", "/health/ready", None, None).await.0,
-        StatusCode::SERVICE_UNAVAILABLE
-    );
+    assert_eq!(verifier.authenticate(Some(&format!("Bearer {}", f.reader))).await, Err(AuthError::Unavailable));
+    let app = api::http::router(ApiState { service: f.state.service, auth: verifier });
+    assert_eq!(request(&app, "GET", "/health/live", None, None).await.0, StatusCode::OK);
+    assert_eq!(request(&app, "GET", "/health/ready", None, None).await.0, StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]
@@ -1132,39 +741,17 @@ async fn http_internal_errors_are_sanitized_and_grpc_mapping_is_consistent() {
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     assert!(!String::from_utf8_lossy(&bytes).contains("sensitive-driver-marker"));
-    assert_eq!(
-        grpc::domain_status(Error::Validation("sensitive-payload".into())).code(),
-        tonic::Code::InvalidArgument
-    );
+    assert_eq!(grpc::domain_status(Error::Validation("sensitive-payload".into())).code(), tonic::Code::InvalidArgument);
     for (code, expected) in [
         ("23505", tonic::Code::AlreadyExists),
         ("23503", tonic::Code::FailedPrecondition),
         ("23P01", tonic::Code::FailedPrecondition),
     ] {
-        assert_eq!(
-            grpc::domain_status(Error::Conflict {
-                sqlstate: code.into(),
-                constraint: None
-            })
-            .code(),
-            expected
-        );
+        assert_eq!(grpc::domain_status(Error::Conflict { sqlstate: code.into(), constraint: None }).code(), expected);
     }
-    assert_eq!(
-        grpc::domain_status(Error::Retryable {
-            sqlstate: "40001".into()
-        })
-        .code(),
-        tonic::Code::Unavailable
-    );
-    assert_eq!(
-        grpc::auth_status(AuthError::Forbidden).code(),
-        tonic::Code::PermissionDenied
-    );
-    assert_eq!(
-        grpc::auth_status(AuthError::Unavailable).code(),
-        tonic::Code::Unavailable
-    );
+    assert_eq!(grpc::domain_status(Error::Retryable { sqlstate: "40001".into() }).code(), tonic::Code::Unavailable);
+    assert_eq!(grpc::auth_status(AuthError::Forbidden).code(), tonic::Code::PermissionDenied);
+    assert_eq!(grpc::auth_status(AuthError::Unavailable).code(), tonic::Code::Unavailable);
 }
 
 #[tokio::test]
@@ -1180,9 +767,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     let server = tokio::spawn(api::serve(state, http, grpc_listener, async {
         let _ = receiver.await;
     }));
-    let mut client = pb::cmdb_client::CmdbClient::connect(format!("http://{addr}"))
-        .await
-        .unwrap();
+    let mut client = pb::cmdb_client::CmdbClient::connect(format!("http://{addr}")).await.unwrap();
     let device = client
         .create_device(auth_request(
             pb::CreateDeviceRequest {
@@ -1199,12 +784,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     assert!(device.created_at.is_some());
     assert_eq!(
         client
-            .get_device(auth_request(
-                pb::IdRequest {
-                    id: device.id.clone()
-                },
-                &f.reader
-            ))
+            .get_device(auth_request(pb::IdRequest { id: device.id.clone() }, &f.reader))
             .await
             .unwrap()
             .into_inner()
@@ -1215,9 +795,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
         .update_device(auth_request(
             pb::UpdateDeviceRequest {
                 id: device.id.clone(),
-                hostname: Some(pb::StringPatch {
-                    change: Some(pb::string_patch::Change::Value("grpc-host".into())),
-                }),
+                hostname: Some(pb::StringPatch { change: Some(pb::string_patch::Change::Value("grpc-host".into())) }),
                 ..Default::default()
             },
             &f.admin,
@@ -1228,11 +806,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     assert_eq!(updated.hostname.as_deref(), Some("grpc-host"));
     let list = client
         .list_devices(auth_request(
-            pb::ListDevicesRequest {
-                rack_id: Some(rack.id.to_string()),
-                limit: Some(1),
-                ..Default::default()
-            },
+            pb::ListDevicesRequest { rack_id: Some(rack.id.to_string()), limit: Some(1), ..Default::default() },
             &f.reader,
         ))
         .await
@@ -1241,12 +815,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     assert_eq!(list.devices.len(), 1);
     assert_eq!(
         client
-            .get_rack(auth_request(
-                pb::IdRequest {
-                    id: rack.id.to_string()
-                },
-                &f.reader
-            ))
+            .get_rack(auth_request(pb::IdRequest { id: rack.id.to_string() }, &f.reader))
             .await
             .unwrap()
             .into_inner()
@@ -1254,44 +823,20 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
         42
     );
     assert_eq!(
-        client
-            .get_device(pb::IdRequest {
-                id: device.id.clone()
-            })
-            .await
-            .unwrap_err()
-            .code(),
+        client.get_device(pb::IdRequest { id: device.id.clone() }).await.unwrap_err().code(),
         tonic::Code::Unauthenticated
     );
     assert_eq!(
-        client
-            .create_device(auth_request(pb::CreateDeviceRequest::default(), &f.reader))
-            .await
-            .unwrap_err()
-            .code(),
+        client.create_device(auth_request(pb::CreateDeviceRequest::default(), &f.reader)).await.unwrap_err().code(),
         tonic::Code::PermissionDenied
     );
     assert_eq!(
-        client
-            .get_device(auth_request(
-                pb::IdRequest {
-                    id: "invalid".into()
-                },
-                &f.reader
-            ))
-            .await
-            .unwrap_err()
-            .code(),
+        client.get_device(auth_request(pb::IdRequest { id: "invalid".into() }, &f.reader)).await.unwrap_err().code(),
         tonic::Code::InvalidArgument
     );
     assert_eq!(
         client
-            .get_device(auth_request(
-                pb::IdRequest {
-                    id: Uuid::new_v4().to_string()
-                },
-                &f.reader
-            ))
+            .get_device(auth_request(pb::IdRequest { id: Uuid::new_v4().to_string() }, &f.reader))
             .await
             .unwrap_err()
             .code(),
@@ -1315,13 +860,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     );
     assert_eq!(
         client
-            .list_devices(auth_request(
-                pb::ListDevicesRequest {
-                    limit: Some(0),
-                    ..Default::default()
-                },
-                &f.reader
-            ))
+            .list_devices(auth_request(pb::ListDevicesRequest { limit: Some(0), ..Default::default() }, &f.reader))
             .await
             .unwrap_err()
             .code(),
@@ -1343,10 +882,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     assert_eq!(
         client
             .list_interfaces(auth_request(
-                pb::ListInterfacesRequest {
-                    device_id: device.id.clone(),
-                    ..Default::default()
-                },
+                pb::ListInterfacesRequest { device_id: device.id.clone(), ..Default::default() },
                 &f.reader
             ))
             .await
@@ -1388,11 +924,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
         assert!(
             client
                 .update_ip_address(auth_request(
-                    pb::UpdateIpAddressRequest {
-                        id: ip.id,
-                        is_management: Some(true),
-                        ..Default::default()
-                    },
+                    pb::UpdateIpAddressRequest { id: ip.id, is_management: Some(true), ..Default::default() },
                     &f.admin
                 ))
                 .await
@@ -1404,10 +936,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     assert_eq!(
         client
             .list_ip_addresses(auth_request(
-                pb::ListIpAddressesRequest {
-                    interface_id: interface.id.clone(),
-                    ..Default::default()
-                },
+                pb::ListIpAddressesRequest { interface_id: interface.id.clone(), ..Default::default() },
                 &f.reader
             ))
             .await
@@ -1419,12 +948,7 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
     );
     assert_eq!(
         client
-            .decommission_device(auth_request(
-                pb::IdRequest {
-                    id: device.id.clone()
-                },
-                &f.admin
-            ))
+            .decommission_device(auth_request(pb::IdRequest { id: device.id.clone() }, &f.admin))
             .await
             .unwrap()
             .into_inner()
@@ -1432,29 +956,19 @@ async fn grpc_real_server_all_rpcs_and_cross_transport_shared_service() {
         pb::LifecycleStatus::Decommissioned as i32
     );
     let response = reqwest::Client::new()
-        .get(format!(
-            "http://{http_addr}/api/v1/cmdb/devices/{}",
-            device.id
-        ))
+        .get(format!("http://{http_addr}/api/v1/cmdb/devices/{}", device.id))
         .bearer_auth(&f.reader)
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert_eq!(
-        response.json::<Value>().await.unwrap()["lifecycle_status"],
-        "decommissioned"
-    );
+    assert_eq!(response.json::<Value>().await.unwrap()["lifecycle_status"], "decommissioned");
     let detached = client
         .update_device(auth_request(
             pb::UpdateDeviceRequest {
                 id: device.id.clone(),
-                rack_id: Some(pb::StringPatch {
-                    change: Some(pb::string_patch::Change::Clear(0)),
-                }),
-                start_unit: Some(pb::Int32Patch {
-                    change: Some(pb::int32_patch::Change::Clear(0)),
-                }),
+                rack_id: Some(pb::StringPatch { change: Some(pb::string_patch::Change::Clear(0)) }),
+                start_unit: Some(pb::Int32Patch { change: Some(pb::int32_patch::Change::Clear(0)) }),
                 ..Default::default()
             },
             &f.admin,
@@ -1477,10 +991,7 @@ async fn binary_starts_both_servers_and_rejects_bad_key_configuration() {
     drop(http);
     drop(grpc_listener);
     let mut child = Command::new(env!("CARGO_BIN_EXE_cmdb-service"))
-        .env(
-            "DATABASE_URL",
-            std::env::var("CMDB_TEST_DATABASE_URL").unwrap(),
-        )
+        .env("DATABASE_URL", std::env::var("CMDB_TEST_DATABASE_URL").unwrap())
         .env("REDIS_URL", redis_url())
         .env("JWT_PUBLIC_KEY_PATH", &keys().public_path)
         .env("CMDB_HTTP_ADDR", http_addr.to_string())
@@ -1489,17 +1000,10 @@ async fn binary_starts_both_servers_and_rejects_bad_key_configuration() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let http_client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(1))
-        .build()
-        .unwrap();
+    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(1)).build().unwrap();
     let mut started = false;
     for _ in 0..100 {
-        if let Ok(response) = http_client
-            .get(format!("http://{http_addr}/health/live"))
-            .send()
-            .await
-        {
+        if let Ok(response) = http_client.get(format!("http://{http_addr}/health/live")).send().await {
             if response.status() == 200 {
                 started = true;
                 break;
@@ -1514,26 +1018,10 @@ async fn binary_starts_both_servers_and_rejects_bad_key_configuration() {
         let _ = child.kill();
     }
     assert!(started, "HTTP binary startup failed");
-    assert_eq!(
-        http_client
-            .get(format!("http://{http_addr}/health/ready"))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        200
-    );
-    let mut client = pb::cmdb_client::CmdbClient::connect(format!("http://{grpc_addr}"))
-        .await
-        .unwrap();
+    assert_eq!(http_client.get(format!("http://{http_addr}/health/ready")).send().await.unwrap().status(), 200);
+    let mut client = pb::cmdb_client::CmdbClient::connect(format!("http://{grpc_addr}")).await.unwrap();
     assert!(client
-        .list_devices(auth_request(
-            pb::ListDevicesRequest {
-                limit: Some(1),
-                ..Default::default()
-            },
-            &f.reader
-        ))
+        .list_devices(auth_request(pb::ListDevicesRequest { limit: Some(1), ..Default::default() }, &f.reader))
         .await
         .is_ok());
     child.kill().unwrap();
@@ -1542,16 +1030,13 @@ async fn binary_starts_both_servers_and_rejects_bad_key_configuration() {
     assert!(!logs.contains(&f.reader));
     assert!(!logs.contains("BEGIN PUBLIC KEY"));
     let bad = Command::new(env!("CARGO_BIN_EXE_cmdb-service"))
-        .env(
-            "DATABASE_URL",
-            std::env::var("CMDB_TEST_DATABASE_URL").unwrap(),
-        )
+        .env("DATABASE_URL", std::env::var("CMDB_TEST_DATABASE_URL").unwrap())
         .env("REDIS_URL", redis_url())
-        .env(
-            "JWT_PUBLIC_KEY_PATH",
-            "/tmp/nonexistent-cmdb-public-key.pem",
-        )
+        .env("JWT_PUBLIC_KEY_PATH", "/tmp/nonexistent-cmdb-public-key.pem")
         .output()
         .unwrap();
     assert!(!bad.status.success());
 }
+
+#[path = "support/workflow_tests.rs"]
+mod workflow_tests;

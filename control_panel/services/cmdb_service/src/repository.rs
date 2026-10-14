@@ -3,44 +3,37 @@ use crate::{models::*, Result};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+mod workflow;
+
 pub struct Repository;
 
 impl Repository {
     pub async fn get_auth_user(conn: &mut PgConnection, id: Uuid) -> Result<Option<AuthUser>> {
-        Ok(sqlx::query_as(
-            "SELECT uuid, token_version_uuid, is_admin, is_super_admin FROM users WHERE uuid = $1",
-        )
-        .bind(id)
-        .fetch_optional(conn)
-        .await?)
-    }
-
-    pub async fn create_site(conn: &mut PgConnection, input: &CreateSite) -> Result<Site> {
-        Ok(
-            sqlx::query_as("INSERT INTO sites (name, description) VALUES ($1, $2) RETURNING *")
-                .bind(&input.name)
-                .bind(&input.description)
-                .fetch_one(conn)
-                .await?,
-        )
-    }
-
-    pub async fn get_site(conn: &mut PgConnection, id: Uuid) -> Result<Option<Site>> {
-        Ok(sqlx::query_as("SELECT * FROM sites WHERE id = $1")
+        Ok(sqlx::query_as("SELECT uuid, token_version_uuid, is_admin, is_super_admin FROM users WHERE uuid = $1")
             .bind(id)
             .fetch_optional(conn)
             .await?)
     }
 
+    pub async fn create_site(conn: &mut PgConnection, input: &CreateSite) -> Result<Site> {
+        Ok(sqlx::query_as("INSERT INTO sites (name, description) VALUES ($1, $2) RETURNING *")
+            .bind(&input.name)
+            .bind(&input.description)
+            .fetch_one(conn)
+            .await?)
+    }
+
+    pub async fn get_site(conn: &mut PgConnection, id: Uuid) -> Result<Option<Site>> {
+        Ok(sqlx::query_as("SELECT * FROM sites WHERE id = $1").bind(id).fetch_optional(conn).await?)
+    }
+
     pub async fn list_sites(conn: &mut PgConnection, page: Pagination) -> Result<Vec<Site>> {
         page.validate()?;
-        Ok(
-            sqlx::query_as("SELECT * FROM sites ORDER BY name, id LIMIT $1 OFFSET $2")
-                .bind(page.limit())
-                .bind(page.offset())
-                .fetch_all(conn)
-                .await?,
-        )
+        Ok(sqlx::query_as("SELECT * FROM sites ORDER BY name, id LIMIT $1 OFFSET $2")
+            .bind(page.limit())
+            .bind(page.offset())
+            .fetch_all(conn)
+            .await?)
     }
 
     pub async fn find_site_by_name(conn: &mut PgConnection, name: &str) -> Result<Option<Site>> {
@@ -54,11 +47,7 @@ impl Repository {
         .await?)
     }
 
-    pub async fn update_site(
-        conn: &mut PgConnection,
-        id: Uuid,
-        input: &UpdateSite,
-    ) -> Result<Option<Site>> {
+    pub async fn update_site(conn: &mut PgConnection, id: Uuid, input: &UpdateSite) -> Result<Option<Site>> {
         Ok(sqlx::query_as(
             "UPDATE sites SET
             name = CASE WHEN $2 THEN $3 ELSE name END,
@@ -75,51 +64,35 @@ impl Repository {
     }
 
     pub async fn delete_site(conn: &mut PgConnection, id: Uuid) -> Result<bool> {
-        Ok(sqlx::query("DELETE FROM sites WHERE id = $1")
-            .bind(id)
-            .execute(conn)
-            .await?
-            .rows_affected()
-            == 1)
+        Ok(sqlx::query("DELETE FROM sites WHERE id = $1").bind(id).execute(conn).await?.rows_affected() == 1)
     }
 
     pub async fn create_room(conn: &mut PgConnection, input: &CreateRoom) -> Result<Room> {
-        Ok(sqlx::query_as(
-            "INSERT INTO rooms (site_id, name, description) VALUES ($1, $2, $3) RETURNING *",
-        )
-        .bind(input.site_id)
-        .bind(&input.name)
-        .bind(&input.description)
-        .fetch_one(conn)
-        .await?)
-    }
-
-    pub async fn get_room(conn: &mut PgConnection, id: Uuid) -> Result<Option<Room>> {
-        Ok(sqlx::query_as("SELECT * FROM rooms WHERE id = $1")
-            .bind(id)
-            .fetch_optional(conn)
+        Ok(sqlx::query_as("INSERT INTO rooms (site_id, name, description) VALUES ($1, $2, $3) RETURNING *")
+            .bind(input.site_id)
+            .bind(&input.name)
+            .bind(&input.description)
+            .fetch_one(conn)
             .await?)
     }
 
-    pub async fn list_rooms(
-        conn: &mut PgConnection,
-        site_id: Option<Uuid>,
-        page: Pagination,
-    ) -> Result<Vec<Room>> {
+    pub async fn get_room(conn: &mut PgConnection, id: Uuid) -> Result<Option<Room>> {
+        Ok(sqlx::query_as("SELECT * FROM rooms WHERE id = $1").bind(id).fetch_optional(conn).await?)
+    }
+
+    pub async fn list_rooms(conn: &mut PgConnection, site_id: Option<Uuid>, page: Pagination) -> Result<Vec<Room>> {
         page.validate()?;
         Ok(sqlx::query_as(
             "SELECT * FROM rooms WHERE ($1::uuid IS NULL OR site_id = $1) ORDER BY name, id LIMIT $2 OFFSET $3",
         )
         .bind(site_id)
-        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
+        .bind(page.limit())
+        .bind(page.offset())
+        .fetch_all(conn)
         .await?)
     }
 
-    pub async fn find_room_by_name(
-        conn: &mut PgConnection,
-        site_id: Uuid,
-        name: &str,
-    ) -> Result<Option<Room>> {
+    pub async fn find_room_by_name(conn: &mut PgConnection, site_id: Uuid, name: &str) -> Result<Option<Room>> {
         Ok(sqlx::query_as(
             "SELECT * FROM rooms WHERE site_id = $1 AND
             lower(btrim(regexp_replace(name, '[[:space:]]+', ' ', 'g'))) =
@@ -131,11 +104,7 @@ impl Repository {
         .await?)
     }
 
-    pub async fn update_room(
-        conn: &mut PgConnection,
-        id: Uuid,
-        input: &UpdateRoom,
-    ) -> Result<Option<Room>> {
+    pub async fn update_room(conn: &mut PgConnection, id: Uuid, input: &UpdateRoom) -> Result<Option<Room>> {
         Ok(sqlx::query_as(
             "UPDATE rooms SET
             site_id = CASE WHEN $2 THEN $3 ELSE site_id END,
@@ -155,12 +124,7 @@ impl Repository {
     }
 
     pub async fn delete_room(conn: &mut PgConnection, id: Uuid) -> Result<bool> {
-        Ok(sqlx::query("DELETE FROM rooms WHERE id = $1")
-            .bind(id)
-            .execute(conn)
-            .await?
-            .rows_affected()
-            == 1)
+        Ok(sqlx::query("DELETE FROM rooms WHERE id = $1").bind(id).execute(conn).await?.rows_affected() == 1)
     }
 
     pub async fn create_rack(conn: &mut PgConnection, input: &CreateRack) -> Result<Rack> {
@@ -177,31 +141,22 @@ impl Repository {
     }
 
     pub async fn get_rack(conn: &mut PgConnection, id: Uuid) -> Result<Option<Rack>> {
-        Ok(sqlx::query_as("SELECT * FROM racks WHERE id = $1")
-            .bind(id)
-            .fetch_optional(conn)
-            .await?)
+        Ok(sqlx::query_as("SELECT * FROM racks WHERE id = $1").bind(id).fetch_optional(conn).await?)
     }
 
-    pub async fn list_racks(
-        conn: &mut PgConnection,
-        room_id: Option<Uuid>,
-        page: Pagination,
-    ) -> Result<Vec<Rack>> {
+    pub async fn list_racks(conn: &mut PgConnection, room_id: Option<Uuid>, page: Pagination) -> Result<Vec<Rack>> {
         page.validate()?;
         Ok(sqlx::query_as(
             "SELECT * FROM racks WHERE ($1::uuid IS NULL OR room_id = $1) ORDER BY name, id LIMIT $2 OFFSET $3",
         )
         .bind(room_id)
-        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
+        .bind(page.limit())
+        .bind(page.offset())
+        .fetch_all(conn)
         .await?)
     }
 
-    pub async fn find_rack_by_name(
-        conn: &mut PgConnection,
-        room_id: Uuid,
-        name: &str,
-    ) -> Result<Option<Rack>> {
+    pub async fn find_rack_by_name(conn: &mut PgConnection, room_id: Uuid, name: &str) -> Result<Option<Rack>> {
         Ok(sqlx::query_as(
             "SELECT * FROM racks WHERE room_id = $1 AND
             lower(btrim(regexp_replace(name, '[[:space:]]+', ' ', 'g'))) =
@@ -213,11 +168,7 @@ impl Repository {
         .await?)
     }
 
-    pub async fn update_rack(
-        conn: &mut PgConnection,
-        id: Uuid,
-        input: &UpdateRack,
-    ) -> Result<Option<Rack>> {
+    pub async fn update_rack(conn: &mut PgConnection, id: Uuid, input: &UpdateRack) -> Result<Option<Rack>> {
         Ok(sqlx::query_as(
             "UPDATE racks SET
             room_id = CASE WHEN $2 THEN $3 ELSE room_id END,
@@ -240,35 +191,33 @@ impl Repository {
     }
 
     pub async fn delete_rack(conn: &mut PgConnection, id: Uuid) -> Result<bool> {
-        Ok(sqlx::query("DELETE FROM racks WHERE id = $1")
-            .bind(id)
-            .execute(conn)
-            .await?
-            .rows_affected()
-            == 1)
+        Ok(sqlx::query("DELETE FROM racks WHERE id = $1").bind(id).execute(conn).await?.rows_affected() == 1)
     }
 
     pub async fn create_device(conn: &mut PgConnection, input: &CreateDevice) -> Result<Device> {
-        Ok(sqlx::query_as("INSERT INTO devices
+        Ok(sqlx::query_as(
+            "INSERT INTO devices
             (rack_id, start_unit, height_u, hostname, device_type, vendor, model, serial, lifecycle_status)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
-            .bind(input.rack_id).bind(input.start_unit).bind(input.height_u).bind(&input.hostname)
-            .bind(&input.device_type).bind(&input.vendor).bind(&input.model).bind(&input.serial)
-            .bind(input.lifecycle_status).fetch_one(conn).await?)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *",
+        )
+        .bind(input.rack_id)
+        .bind(input.start_unit)
+        .bind(input.height_u)
+        .bind(&input.hostname)
+        .bind(&input.device_type)
+        .bind(&input.vendor)
+        .bind(&input.model)
+        .bind(&input.serial)
+        .bind(input.lifecycle_status)
+        .fetch_one(conn)
+        .await?)
     }
 
     pub async fn get_device(conn: &mut PgConnection, id: Uuid) -> Result<Option<Device>> {
-        Ok(sqlx::query_as("SELECT * FROM devices WHERE id = $1")
-            .bind(id)
-            .fetch_optional(conn)
-            .await?)
+        Ok(sqlx::query_as("SELECT * FROM devices WHERE id = $1").bind(id).fetch_optional(conn).await?)
     }
 
-    pub async fn list_devices(
-        conn: &mut PgConnection,
-        filter: &DeviceFilter,
-        page: Pagination,
-    ) -> Result<Vec<Device>> {
+    pub async fn list_devices(conn: &mut PgConnection, filter: &DeviceFilter, page: Pagination) -> Result<Vec<Device>> {
         page.validate()?;
         Ok(sqlx::query_as(
             "SELECT * FROM devices WHERE
@@ -286,11 +235,7 @@ impl Repository {
         .await?)
     }
 
-    pub async fn update_device(
-        conn: &mut PgConnection,
-        id: Uuid,
-        input: &UpdateDevice,
-    ) -> Result<Option<Device>> {
+    pub async fn update_device(conn: &mut PgConnection, id: Uuid, input: &UpdateDevice) -> Result<Option<Device>> {
         Ok(sqlx::query_as(
             "UPDATE devices SET
             rack_id = CASE WHEN $2 THEN $3 ELSE rack_id END,
@@ -328,18 +273,13 @@ impl Repository {
     }
 
     pub async fn decommission_device(conn: &mut PgConnection, id: Uuid) -> Result<Option<Device>> {
-        Ok(sqlx::query_as(
-            "UPDATE devices SET lifecycle_status = 'decommissioned' WHERE id = $1 RETURNING *",
-        )
-        .bind(id)
-        .fetch_optional(conn)
-        .await?)
+        Ok(sqlx::query_as("UPDATE devices SET lifecycle_status = 'decommissioned' WHERE id = $1 RETURNING *")
+            .bind(id)
+            .fetch_optional(conn)
+            .await?)
     }
 
-    pub async fn create_interface(
-        conn: &mut PgConnection,
-        input: &CreateInterface,
-    ) -> Result<Interface> {
+    pub async fn create_interface(conn: &mut PgConnection, input: &CreateInterface) -> Result<Interface> {
         Ok(sqlx::query_as(
             "INSERT INTO interfaces
             (device_id, if_index, name, description, interface_type, mac_address)
@@ -356,23 +296,18 @@ impl Repository {
     }
 
     pub async fn get_interface(conn: &mut PgConnection, id: Uuid) -> Result<Option<Interface>> {
-        Ok(sqlx::query_as("SELECT * FROM interfaces WHERE id = $1")
-            .bind(id)
-            .fetch_optional(conn)
-            .await?)
+        Ok(sqlx::query_as("SELECT * FROM interfaces WHERE id = $1").bind(id).fetch_optional(conn).await?)
     }
 
-    pub async fn list_interfaces(
-        conn: &mut PgConnection,
-        device_id: Uuid,
-        page: Pagination,
-    ) -> Result<Vec<Interface>> {
+    pub async fn list_interfaces(conn: &mut PgConnection, device_id: Uuid, page: Pagination) -> Result<Vec<Interface>> {
         page.validate()?;
         Ok(sqlx::query_as(
             "SELECT * FROM interfaces WHERE device_id = $1 ORDER BY if_index NULLS LAST, name, id LIMIT $2 OFFSET $3",
         )
         .bind(device_id)
-        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
+        .bind(page.limit())
+        .bind(page.offset())
+        .fetch_all(conn)
         .await?)
     }
 
@@ -409,18 +344,10 @@ impl Repository {
     }
 
     pub async fn delete_interface(conn: &mut PgConnection, id: Uuid) -> Result<bool> {
-        Ok(sqlx::query("DELETE FROM interfaces WHERE id = $1")
-            .bind(id)
-            .execute(conn)
-            .await?
-            .rows_affected()
-            == 1)
+        Ok(sqlx::query("DELETE FROM interfaces WHERE id = $1").bind(id).execute(conn).await?.rows_affected() == 1)
     }
 
-    pub async fn create_ip_address(
-        conn: &mut PgConnection,
-        input: &CreateIpAddress,
-    ) -> Result<IpAddress> {
+    pub async fn create_ip_address(conn: &mut PgConnection, input: &CreateIpAddress) -> Result<IpAddress> {
         Ok(sqlx::query_as(
             "INSERT INTO ip_addresses (interface_id, address, is_management)
             VALUES ($1,$2,$3) RETURNING *",
@@ -433,10 +360,7 @@ impl Repository {
     }
 
     pub async fn get_ip_address(conn: &mut PgConnection, id: Uuid) -> Result<Option<IpAddress>> {
-        Ok(sqlx::query_as("SELECT * FROM ip_addresses WHERE id = $1")
-            .bind(id)
-            .fetch_optional(conn)
-            .await?)
+        Ok(sqlx::query_as("SELECT * FROM ip_addresses WHERE id = $1").bind(id).fetch_optional(conn).await?)
     }
 
     pub async fn list_ip_addresses(
@@ -445,12 +369,12 @@ impl Repository {
         page: Pagination,
     ) -> Result<Vec<IpAddress>> {
         page.validate()?;
-        Ok(sqlx::query_as(
-            "SELECT * FROM ip_addresses WHERE interface_id = $1 ORDER BY address, id LIMIT $2 OFFSET $3",
-        )
-        .bind(interface_id)
-        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
-        .await?)
+        Ok(sqlx::query_as("SELECT * FROM ip_addresses WHERE interface_id = $1 ORDER BY address, id LIMIT $2 OFFSET $3")
+            .bind(interface_id)
+            .bind(page.limit())
+            .bind(page.offset())
+            .fetch_all(conn)
+            .await?)
     }
 
     pub async fn update_ip_address(
@@ -477,12 +401,7 @@ impl Repository {
     }
 
     pub async fn delete_ip_address(conn: &mut PgConnection, id: Uuid) -> Result<bool> {
-        Ok(sqlx::query("DELETE FROM ip_addresses WHERE id = $1")
-            .bind(id)
-            .execute(conn)
-            .await?
-            .rows_affected()
-            == 1)
+        Ok(sqlx::query("DELETE FROM ip_addresses WHERE id = $1").bind(id).execute(conn).await?.rows_affected() == 1)
     }
 
     pub async fn is_field_overridden(
