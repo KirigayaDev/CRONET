@@ -5,6 +5,51 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sqlx::FromRow;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Pagination {
+    limit: i64,
+    offset: i64,
+}
+
+impl Default for Pagination {
+    fn default() -> Self {
+        Self {
+            limit: 50,
+            offset: 0,
+        }
+    }
+}
+
+impl Pagination {
+    pub fn new(limit: i64, offset: i64) -> crate::Result<Self> {
+        let page = Self { limit, offset };
+        page.validate()?;
+        Ok(page)
+    }
+    pub fn validate(self) -> crate::Result<()> {
+        if !(1..=200).contains(&self.limit) || self.offset < 0 {
+            return Err(crate::Error::validation(
+                "Pagination requires limit 1..=200 and offset >= 0",
+            ));
+        }
+        Ok(())
+    }
+    pub fn limit(self) -> i64 {
+        self.limit
+    }
+    pub fn offset(self) -> i64 {
+        self.offset
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub struct AuthUser {
+    pub uuid: Uuid,
+    pub token_version_uuid: Uuid,
+    pub is_admin: bool,
+    pub is_super_admin: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]

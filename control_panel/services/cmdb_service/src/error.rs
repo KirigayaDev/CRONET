@@ -5,6 +5,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("{0}")]
+    Internal(&'static str),
     #[error("{entity} {id} was not found")]
     NotFound { entity: &'static str, id: Uuid },
     #[error("Invalid input: {0}")]

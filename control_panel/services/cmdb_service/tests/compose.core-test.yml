@@ -1,5 +1,15 @@
 # Independent test project: no control_panel/.env, published ports or DB bind mounts.
 services:
+  redis:
+    image: redis:8.2.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
   postgres:
     image: postgres:18-alpine
     environment:
@@ -35,6 +45,7 @@ services:
       CARGO_TARGET_DIR: /build
       CMDB_TEST_DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
       DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
+      CMDB_TEST_REDIS_URL: redis://redis:6379
     volumes:
       - ..:/workspace
       - cargo_registry:/usr/local/cargo/registry
@@ -42,6 +53,8 @@ services:
     depends_on:
       database_migrations:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
 volumes:
   cargo_registry:

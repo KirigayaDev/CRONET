@@ -1,4 +1,6 @@
 //! Transport-independent CMDB core. Alembic remains the schema owner.
+pub mod api;
+pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;

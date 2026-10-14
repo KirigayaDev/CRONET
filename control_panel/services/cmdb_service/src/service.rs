@@ -102,7 +102,11 @@ impl Service {
         )
     }
     pub async fn list_sites(&self) -> Result<Vec<Site>> {
-        Repository::list_sites(&mut *self.pool.acquire().await?).await
+        self.list_sites_page(Pagination::default()).await
+    }
+    pub async fn list_sites_page(&self, page: Pagination) -> Result<Vec<Site>> {
+        page.validate()?;
+        Repository::list_sites(&mut *self.pool.acquire().await?, page).await
     }
     pub async fn find_site_by_name(&self, name: &str) -> Result<Option<Site>> {
         validate_name(name)?;
@@ -153,7 +157,15 @@ impl Service {
         )
     }
     pub async fn list_rooms(&self, site_id: Option<Uuid>) -> Result<Vec<Room>> {
-        Repository::list_rooms(&mut *self.pool.acquire().await?, site_id).await
+        self.list_rooms_page(site_id, Pagination::default()).await
+    }
+    pub async fn list_rooms_page(
+        &self,
+        site_id: Option<Uuid>,
+        page: Pagination,
+    ) -> Result<Vec<Room>> {
+        page.validate()?;
+        Repository::list_rooms(&mut *self.pool.acquire().await?, site_id, page).await
     }
     pub async fn find_room_by_name(&self, site_id: Uuid, name: &str) -> Result<Option<Room>> {
         validate_name(name)?;
@@ -206,7 +218,15 @@ impl Service {
         )
     }
     pub async fn list_racks(&self, room_id: Option<Uuid>) -> Result<Vec<Rack>> {
-        Repository::list_racks(&mut *self.pool.acquire().await?, room_id).await
+        self.list_racks_page(room_id, Pagination::default()).await
+    }
+    pub async fn list_racks_page(
+        &self,
+        room_id: Option<Uuid>,
+        page: Pagination,
+    ) -> Result<Vec<Rack>> {
+        page.validate()?;
+        Repository::list_racks(&mut *self.pool.acquire().await?, room_id, page).await
     }
     pub async fn find_rack_by_name(&self, room_id: Uuid, name: &str) -> Result<Option<Rack>> {
         validate_name(name)?;
@@ -261,7 +281,15 @@ impl Service {
         )
     }
     pub async fn list_devices(&self, filter: &DeviceFilter) -> Result<Vec<Device>> {
-        Repository::list_devices(&mut *self.pool.acquire().await?, filter).await
+        self.list_devices_page(filter, Pagination::default()).await
+    }
+    pub async fn list_devices_page(
+        &self,
+        filter: &DeviceFilter,
+        page: Pagination,
+    ) -> Result<Vec<Device>> {
+        page.validate()?;
+        Repository::list_devices(&mut *self.pool.acquire().await?, filter, page).await
     }
     pub async fn update_device(&self, id: Uuid, input: UpdateDevice) -> Result<Device> {
         self.retryable_transaction(|tx| {
@@ -319,7 +347,16 @@ impl Service {
         )
     }
     pub async fn list_interfaces(&self, device_id: Uuid) -> Result<Vec<Interface>> {
-        Repository::list_interfaces(&mut *self.pool.acquire().await?, device_id).await
+        self.list_interfaces_page(device_id, Pagination::default())
+            .await
+    }
+    pub async fn list_interfaces_page(
+        &self,
+        device_id: Uuid,
+        page: Pagination,
+    ) -> Result<Vec<Interface>> {
+        page.validate()?;
+        Repository::list_interfaces(&mut *self.pool.acquire().await?, device_id, page).await
     }
     pub async fn update_interface(&self, id: Uuid, input: UpdateInterface) -> Result<Interface> {
         self.retryable_transaction(|tx| {
@@ -371,7 +408,16 @@ impl Service {
         )
     }
     pub async fn list_ip_addresses(&self, interface_id: Uuid) -> Result<Vec<IpAddress>> {
-        Repository::list_ip_addresses(&mut *self.pool.acquire().await?, interface_id).await
+        self.list_ip_addresses_page(interface_id, Pagination::default())
+            .await
+    }
+    pub async fn list_ip_addresses_page(
+        &self,
+        interface_id: Uuid,
+        page: Pagination,
+    ) -> Result<Vec<IpAddress>> {
+        page.validate()?;
+        Repository::list_ip_addresses(&mut *self.pool.acquire().await?, interface_id, page).await
     }
     pub async fn update_ip_address(&self, id: Uuid, input: UpdateIpAddress) -> Result<IpAddress> {
         self.retryable_transaction(|tx| {

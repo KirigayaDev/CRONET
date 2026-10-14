@@ -120,16 +120,17 @@ async fn pool_and_minimal_binary_startup() {
         .unwrap()
         .contains("DATABASE_URL is required"));
     let ready = std::process::Command::new(env!("CARGO_BIN_EXE_cmdb-service"))
+        .env_remove("REDIS_URL")
         .env(
             "DATABASE_URL",
             std::env::var("CMDB_TEST_DATABASE_URL").unwrap(),
         )
         .output()
         .unwrap();
-    assert!(ready.status.success());
-    assert!(String::from_utf8(ready.stdout)
+    assert!(!ready.status.success());
+    assert!(String::from_utf8(ready.stderr)
         .unwrap()
-        .contains("CMDB core ready"));
+        .contains("REDIS_URL is required"));
 }
 
 #[tokio::test]
@@ -146,7 +147,7 @@ async fn site_crud_and_patch_null_semantics() {
         Some("original")
     );
     assert!(service
-        .list_sites()
+        .list_sites_page(Pagination::new(200, 0).unwrap())
         .await
         .unwrap()
         .iter()

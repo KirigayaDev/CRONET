@@ -6,6 +6,15 @@ use uuid::Uuid;
 pub struct Repository;
 
 impl Repository {
+    pub async fn get_auth_user(conn: &mut PgConnection, id: Uuid) -> Result<Option<AuthUser>> {
+        Ok(sqlx::query_as(
+            "SELECT uuid, token_version_uuid, is_admin, is_super_admin FROM users WHERE uuid = $1",
+        )
+        .bind(id)
+        .fetch_optional(conn)
+        .await?)
+    }
+
     pub async fn create_site(conn: &mut PgConnection, input: &CreateSite) -> Result<Site> {
         Ok(
             sqlx::query_as("INSERT INTO sites (name, description) VALUES ($1, $2) RETURNING *")
@@ -23,10 +32,15 @@ impl Repository {
             .await?)
     }
 
-    pub async fn list_sites(conn: &mut PgConnection) -> Result<Vec<Site>> {
-        Ok(sqlx::query_as("SELECT * FROM sites ORDER BY name, id")
-            .fetch_all(conn)
-            .await?)
+    pub async fn list_sites(conn: &mut PgConnection, page: Pagination) -> Result<Vec<Site>> {
+        page.validate()?;
+        Ok(
+            sqlx::query_as("SELECT * FROM sites ORDER BY name, id LIMIT $1 OFFSET $2")
+                .bind(page.limit())
+                .bind(page.offset())
+                .fetch_all(conn)
+                .await?,
+        )
     }
 
     pub async fn find_site_by_name(conn: &mut PgConnection, name: &str) -> Result<Option<Site>> {
@@ -87,12 +101,17 @@ impl Repository {
             .await?)
     }
 
-    pub async fn list_rooms(conn: &mut PgConnection, site_id: Option<Uuid>) -> Result<Vec<Room>> {
+    pub async fn list_rooms(
+        conn: &mut PgConnection,
+        site_id: Option<Uuid>,
+        page: Pagination,
+    ) -> Result<Vec<Room>> {
+        page.validate()?;
         Ok(sqlx::query_as(
-            "SELECT * FROM rooms WHERE ($1::uuid IS NULL OR site_id = $1) ORDER BY name, id",
+            "SELECT * FROM rooms WHERE ($1::uuid IS NULL OR site_id = $1) ORDER BY name, id LIMIT $2 OFFSET $3",
         )
         .bind(site_id)
-        .fetch_all(conn)
+        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
         .await?)
     }
 
@@ -164,12 +183,17 @@ impl Repository {
             .await?)
     }
 
-    pub async fn list_racks(conn: &mut PgConnection, room_id: Option<Uuid>) -> Result<Vec<Rack>> {
+    pub async fn list_racks(
+        conn: &mut PgConnection,
+        room_id: Option<Uuid>,
+        page: Pagination,
+    ) -> Result<Vec<Rack>> {
+        page.validate()?;
         Ok(sqlx::query_as(
-            "SELECT * FROM racks WHERE ($1::uuid IS NULL OR room_id = $1) ORDER BY name, id",
+            "SELECT * FROM racks WHERE ($1::uuid IS NULL OR room_id = $1) ORDER BY name, id LIMIT $2 OFFSET $3",
         )
         .bind(room_id)
-        .fetch_all(conn)
+        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
         .await?)
     }
 
@@ -243,17 +267,21 @@ impl Repository {
     pub async fn list_devices(
         conn: &mut PgConnection,
         filter: &DeviceFilter,
+        page: Pagination,
     ) -> Result<Vec<Device>> {
+        page.validate()?;
         Ok(sqlx::query_as(
             "SELECT * FROM devices WHERE
             ($1::uuid IS NULL OR rack_id = $1) AND ($2::text IS NULL OR hostname = $2) AND
             ($3::text IS NULL OR serial = $3) AND ($4::text IS NULL OR lifecycle_status = $4)
-            ORDER BY created_at, id",
+            ORDER BY created_at, id LIMIT $5 OFFSET $6",
         )
         .bind(filter.rack_id)
         .bind(&filter.hostname)
         .bind(&filter.serial)
         .bind(filter.lifecycle_status)
+        .bind(page.limit())
+        .bind(page.offset())
         .fetch_all(conn)
         .await?)
     }
@@ -337,12 +365,14 @@ impl Repository {
     pub async fn list_interfaces(
         conn: &mut PgConnection,
         device_id: Uuid,
+        page: Pagination,
     ) -> Result<Vec<Interface>> {
+        page.validate()?;
         Ok(sqlx::query_as(
-            "SELECT * FROM interfaces WHERE device_id = $1 ORDER BY if_index NULLS LAST, name, id",
+            "SELECT * FROM interfaces WHERE device_id = $1 ORDER BY if_index NULLS LAST, name, id LIMIT $2 OFFSET $3",
         )
         .bind(device_id)
-        .fetch_all(conn)
+        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
         .await?)
     }
 
@@ -412,12 +442,14 @@ impl Repository {
     pub async fn list_ip_addresses(
         conn: &mut PgConnection,
         interface_id: Uuid,
+        page: Pagination,
     ) -> Result<Vec<IpAddress>> {
+        page.validate()?;
         Ok(sqlx::query_as(
-            "SELECT * FROM ip_addresses WHERE interface_id = $1 ORDER BY address, id",
+            "SELECT * FROM ip_addresses WHERE interface_id = $1 ORDER BY address, id LIMIT $2 OFFSET $3",
         )
         .bind(interface_id)
-        .fetch_all(conn)
+        .bind(page.limit()).bind(page.offset()).fetch_all(conn)
         .await?)
     }
 
