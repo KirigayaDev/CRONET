@@ -1,0 +1,38 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Версия SNMP. Значения совпадают с номерами версий в протоколе.
+enum SnmpVersion {
+  SNMP_VERSION_UNSPECIFIED = 0;
+  SNMP_VERSION_V1 = 1;
+  SNMP_VERSION_V2C = 2;
+  SNMP_VERSION_V3 = 3;
+}
+
+// Значение SNMP без интерпретации: тип сохраняется как есть,
+// смысл (метрика, единицы, скорость счётчика) придаёт parser-processor.
+message SnmpValue {
+  oneof kind {
+    sint64 integer = 1;
+    bytes octet_string = 2;
+    string object_id = 3;
+    bytes ip_address = 4;       // 4 байта
+    uint32 counter32 = 5;
+    uint32 unsigned32 = 6;      // Gauge32 / Unsigned32
+    uint32 timeticks = 7;
+    bytes opaque = 8;
+    uint64 counter64 = 9;
+    bool null = 10;
+    bool no_such_object = 11;
+    bool no_such_instance = 12;
+    bool end_of_mib_view = 13;
+    bool unsupported = 14;      // тип, который кодек не умеет представить
+  }
+}
+
+message VarBind {
+  string oid = 1;             // точечная запись: "1.3.6.1.2.1.1.3.0"
+  SnmpValue value = 2;
+}

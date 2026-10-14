@@ -1,0 +1,69 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+  schedule:
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: fmt, clippy, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  supply-chain:
+    name: cargo-audit, cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install tools
+        run: cargo install cargo-audit cargo-deny --locked
+      - name: cargo audit
+        id: audit
+        continue-on-error: true
+        run: cargo audit
+      - name: cargo deny
+        id: deny
+        continue-on-error: true
+        run: cargo deny check
+      - name: Warn if findings
+        if: steps.audit.outcome == 'failure' || steps.deny.outcome == 'failure'
+        run: echo "::warning title=Security::cargo audit/deny нашли замечания, смотрите лог"
+
+  e2e:
+    name: end-to-end (NATS + snmpsim)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Start test environment
+        run: docker compose -f testenv_snmp/docker-compose.yml up -d
+      - name: Wait for snmpsim
+        run: sleep 25
+      - name: Run e2e
+        run: NETMON_E2E=1 cargo test --workspace -- --test-threads=1

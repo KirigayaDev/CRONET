@@ -1,0 +1,47 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+import "netmon/v1/common.proto";
+
+// Задача на опрос. Публикует планировщик в tasks.snmp.<site>.
+// Секретов здесь НЕТ: только ссылка на них (credential_ref).
+message PollTask {
+  string task_id = 1;
+  string device_id = 2;
+  string target = 3;                 // "10.0.0.1:161"
+  SnmpVersion snmp_version = 4;
+  string credential_ref = 5;         // "vault:secret/snmp/site-a/core"
+  repeated string get_oids = 6;      // GET (до 60 OID за запрос, poller режет сам)
+  repeated string walk_roots = 7;    // обход поддеревьев (GETBULK)
+  uint32 timeout_ms = 8;             // таймаут одного запроса; 0 = значение по умолчанию
+  google.protobuf.Timestamp deadline = 9;  // после этого момента опрашивать бессмысленно
+  uint32 attempt = 10;               // номер попытки; входит в Nats-Msg-Id результата
+  uint32 max_repetitions = 11;       // для GETBULK; 0 = значение по умолчанию
+}
+
+enum PollStatus {
+  POLL_STATUS_UNSPECIFIED = 0;
+  POLL_STATUS_OK = 1;
+  POLL_STATUS_TIMEOUT = 2;
+  POLL_STATUS_AUTH_FAIL = 3;      // неверная community / учётка v3
+  POLL_STATUS_EXPIRED = 4;        // дедлайн прошёл до начала опроса
+  POLL_STATUS_CRED_ERROR = 5;     // не удалось получить или разобрать секрет
+  POLL_STATUS_BAD_TASK = 6;       // задача некорректна (OID, версия, target)
+  POLL_STATUS_ERROR = 7;          // прочее (сеть, разбор ответа)
+}
+
+// Сырой результат опроса. Ошибки - тоже результат: иначе downstream не отличит
+// «устройство молчит» от «ничего не произошло».
+message RawSnmpResult {
+  string task_id = 1;
+  string device_id = 2;
+  string collector_id = 3;
+  uint32 attempt = 4;
+  google.protobuf.Timestamp collected_at = 5;
+  uint32 duration_ms = 6;
+  PollStatus status = 7;
+  string error_detail = 8;           // без секретов
+  repeated VarBind varbinds = 9;
+  bool truncated = 10;               // достигнут лимит varbind'ов на задачу
+}

@@ -1,0 +1,4 @@
+# unwrap/expect/panic запрещены в рабочем коде (предупреждение), но в тестах допустимы
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

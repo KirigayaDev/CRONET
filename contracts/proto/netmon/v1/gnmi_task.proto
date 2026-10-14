@@ -1,0 +1,39 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Желаемое состояние подписки (значение в KV-бакете gnmi-desired, ключ = device_id).
+// Пишет планировщик/CMDB. Коллектор забирает устройство, захватив lease в gnmi-leases.
+message GnmiSubscribeTask {
+  string device_id = 1;
+  string target = 2;                 // "10.0.0.1:57400"
+  string credential_ref = 3;         // username/password (+ ссылка на CA) в Vault
+  bool tls = 4;
+  string tls_server_name = 5;        // SNI / проверка сертификата
+  repeated GnmiPath paths = 6;
+  GnmiMode mode = 7;
+  uint64 sample_interval_ns = 8;     // для SAMPLE; 0 = на усмотрение устройства
+  uint64 heartbeat_interval_ns = 9;
+  string origin = 10;                // обычно "openconfig" или пусто
+  string site = 11;
+}
+
+message GnmiPath { string path = 1; }   // "/interfaces/interface/state/counters"
+
+enum GnmiMode {
+  GNMI_MODE_UNSPECIFIED = 0;
+  GNMI_MODE_SAMPLE = 1;
+  GNMI_MODE_ON_CHANGE = 2;
+}
+
+// Сырое обновление. gnmi.SubscribeResponse передаётся как есть (protobuf-байты),
+// интерпретацию путей делает parser-processor.
+message RawGnmiUpdate {
+  string device_id = 1;
+  string collector_id = 2;
+  uint64 sequence = 3;               // монотонно растёт в пределах одной сессии
+  string session_id = 4;             // новая при каждом (пере)подключении
+  google.protobuf.Timestamp received_at = 5;
+  bytes subscribe_response = 6;      // encoded gnmi.SubscribeResponse
+}
