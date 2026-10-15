@@ -26,7 +26,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo test --workspace --exclude cmdb-service
 
   supply-chain:
     name: cargo-audit, cargo-deny
@@ -66,4 +66,55 @@ jobs:
       - name: Wait for snmpsim
         run: sleep 25
       - name: Run e2e
-        run: NETMON_E2E=1 cargo test --workspace -- --test-threads=1
+        run: NETMON_E2E=1 cargo test --workspace --exclude cmdb-service -- --test-threads=1
+
+  cmdb-unit:
+    name: CMDB static and unit (Rust 1.89)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked -p cmdb-service --all-targets
+      - run: cargo test --locked -p cmdb-service --lib
+
+  cmdb-integration:
+    name: CMDB PostgreSQL and Redis integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: cronet-cmdb-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: services/control_panel/services/cmdb_service/tests/compose.core-test.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start isolated CMDB environment
+        run: docker compose up -d --build rust
+      - name: Run all CMDB tests
+        run: docker compose exec -T rust cargo test --locked -p cmdb-service
+      - name: Cleanup isolated CMDB environment
+        if: always()
+        run: docker compose down --volumes
+
+  cmdb-migrations:
+    name: CMDB Alembic integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      COMPOSE_PROJECT_NAME: cronet-cmdb-migrations-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: services/control_panel/services/database_migrations/tests/compose.cmdb-test.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: docker compose build database_migrations
+      - run: docker compose up -d --wait postgres
+      - name: Run migration suite including downgrade and repeated upgrade
+        run: docker compose run --rm --no-deps database_migrations python -B -m unittest discover -s tests -p test_cmdb_migration.py -v
+      - name: Cleanup isolated migration environment
+        if: always()
+        run: docker compose down --volumes
