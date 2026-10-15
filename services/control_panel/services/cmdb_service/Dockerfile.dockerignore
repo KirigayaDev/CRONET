@@ -27,6 +27,10 @@
 !services/control_panel/services/cmdb_service/Cargo.toml
 !services/control_panel/services/cmdb_service/src/
 !services/control_panel/services/cmdb_service/src/**
+!services/control_panel/services/discovery_service/
+!services/control_panel/services/discovery_service/Cargo.toml
+!services/control_panel/services/discovery_service/src/
+!services/control_panel/services/discovery_service/src/**
 **/.env
 **/.env.*
 **/*.pem

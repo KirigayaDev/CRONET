@@ -118,3 +118,24 @@ jobs:
       - name: Cleanup isolated migration environment
         if: always()
         run: docker compose down --volumes
+
+  discovery-e2e:
+    name: Discovery real SNMP and CMDB acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: cronet-discovery-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: services/control_panel/services/discovery_service/tests/compose.discovery-test.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start isolated Discovery environment
+        run: docker compose up -d --build --wait snmpsim
+      - name: Build CMDB server
+        run: docker compose exec -T rust cargo build --locked -p cmdb-service
+      - name: Run real UDP and full Discovery acceptance
+        run: docker compose exec -T rust cargo test --locked -p discovery-service --test e2e -- --test-threads=1
+      - name: Cleanup isolated Discovery environment
+        if: always()
+        run: docker compose down --volumes
