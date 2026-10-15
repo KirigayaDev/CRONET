@@ -47,7 +47,7 @@ services:
       DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
       CMDB_TEST_REDIS_URL: redis://redis:6379
     volumes:
-      - ..:/workspace
+      - ../../../../..:/workspace:ro
       - cargo_registry:/usr/local/cargo/registry
       - cargo_target:/build
     depends_on:

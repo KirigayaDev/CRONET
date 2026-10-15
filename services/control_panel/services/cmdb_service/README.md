@@ -1,25 +1,25 @@
 # CMDB service: transactional audit, overrides and device CSV import
 
-Standalone Cargo package on `feature/d1-cmdb-api`. Stage 4 adds transactional
+Root workspace member on `feature/d1-cmdb-api`. Stage 4 adds transactional
 audit, manual field ownership and staged CSV device import to the existing
 HTTP/Axum and gRPC/tonic APIs. Both transports share one Service and Authenticator.
 
 The existing Alembic head is `8b6e2f4a9c10`. This package never creates tables,
 changes schema, reads .env files, or runs migrations itself. Apply the existing
 Alembic chain before startup. The existing audit/override/import tables are
-reused without a new migration. Deployment/workspace integration, Discovery,
-Scheduler and service-account identities remain separate later work.
+reused without a new migration. Stage 5 integrates the canonical layout, shared
+contracts, Docker/Compose and isolated CI. Discovery, Scheduler and service-account
+identities remain separate work.
 
 ## Structure
 
 ```text
 cmdb_service/
   Cargo.toml
-  Cargo.lock
   README.md
-  build.rs
   rustfmt.toml
-  proto/cmdb.proto
+  Dockerfile
+  Dockerfile.dockerignore
   examples/devices-template.csv
   src/
     lib.rs
@@ -50,12 +50,12 @@ cmdb_service/
 
 api/dto.rs keeps HTTP/OpenAPI schemas and input conversions separate from
 domain models. api/mod.rs owns shared state and concurrent server lifecycle.
-build.rs generates typed protobuf clients and servers in Cargo's output
-directory, outside Git.
+The shared contracts crate generates typed protobuf clients and servers in
+Cargo's output directory, outside Git, and api/grpc.rs re-exports its CMDB module.
 
 ## Dependencies
 
-Resolved versions are committed in Cargo.lock.
+Resolved versions are committed in the repository root Cargo.lock.
 
 | Dependency | Purpose |
 | --- | --- |
@@ -63,7 +63,7 @@ Resolved versions are committed in Cargo.lock.
 | csv 1.4 | Device CSV parsing, with an additional strict quote/header/size guard. |
 | tonic / tonic-prost 0.14 | gRPC transport and protobuf codec. |
 | prost / prost-types 0.14 | Typed messages, standard Timestamp/NullValue. |
-| tonic-prost-build 0.14 (build) | Generate clients and servers from cmdb.proto. |
+| contracts (workspace) | Shared generated CMDB clients and servers. |
 | tokio-stream 0.1 | Serve tonic from a bound TCP listener. |
 | jsonwebtoken 10 | RS256 verification with rust_crypto and use_pem. |
 | rsa 0.9 | Validate actual RSA public key and minimum 2048-bit modulus at startup. |
@@ -80,9 +80,8 @@ mac_address remain the core dependencies. Tokio adds net/signal/sync features.
 SQLx enables PostgreSQL, native types and JSONB. No NATS, SNMP, Discovery or
 Scheduler dependency is added.
 
-Building requires protoc and standard protobuf includes. The isolated test
-Dockerfile installs protobuf-compiler, libprotobuf-dev and OpenSSL without
-changing the host toolchain or any shared Dockerfile.
+Shared generation uses protoc-bin-vendored and requires no system protoc.
+The isolated test Dockerfile pins Rust 1.89 and installs OpenSSL for test keys.
 
 ## Configuration and startup
 
@@ -108,7 +107,7 @@ Redis, validates RSA, creates shared Service/Authenticator, binds both listeners
 and serves HTTP and gRPC concurrently. Missing, malformed or private PEM fails
 startup before either API is served. Production CMDB reads only a public key.
 
-Ctrl-C signals both servers with up to five seconds for graceful shutdown.
+SIGTERM and Ctrl-C signal both servers with up to five seconds for graceful shutdown.
 Unexpected exit of either server stops its peer and returns failure. The
 PostgreSQL pool closes on return. Startup logs contain bind addresses only.
 
@@ -126,7 +125,7 @@ HTTP JSON/path/query or gRPC typed request
 
 Responses convert domain entities to HTTP DTOs or protobuf messages. Handlers
 contain no entity SQL, transactions or duplicated business rules. Auth's user
-lookup also lives in Repository. The existing db SELECT 1 health helper remains.
+lookup also lives in Repository. Readiness additionally checks the required schema.
 
 The core retains UUID, DateTime<Utc>, native INET/MACADDR, separate Create*/Update*
 inputs and transport-independent errors. PostgreSQL remains authoritative for
@@ -277,7 +276,8 @@ exclude driver details, SQL, URLs, tokens, key bodies and stack traces.
 
 ## gRPC
 
-proto/cmdb.proto defines package cronet.cmdb.v1, service Cmdb, and twelve RPCs:
+contracts/proto/cronet/cmdb/v1/cmdb.proto in the repository root defines package
+cronet.cmdb.v1, service Cmdb, and twelve RPCs:
 
 | Area | RPCs |
 | --- | --- |
@@ -299,7 +299,7 @@ the generated client against real TCP listeners and verify gRPC changes via HTTP
 ## Health and logging
 
 /health/live returns 200/ok while HTTP runs, without dependency checks.
-/health/ready checks PostgreSQL SELECT 1 and Redis PING: 200/ok if available,
+/health/ready checks the ten required PostgreSQL D1 tables and Redis PING: 200/ok if available,
 503/unavailable otherwise. A valid key is guaranteed at startup and is not
 reloaded for each probe. Dependency failures log only a fixed warning.
 
@@ -471,16 +471,16 @@ Run from this directory with a fresh unique Compose project name:
 
 ```sh
 docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml up -d --build rust
-docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo fmt --check
-docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo check --locked
-docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo clippy --locked --all-targets -- -D warnings
-docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo test --locked
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo fmt --all --check
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo check --locked -p cmdb-service --all-targets
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo clippy --locked -p cmdb-service --all-targets -- -D warnings
+docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml exec -T rust cargo test --locked -p cmdb-service
 docker compose -p cronet-cmdb-stage4-01a12211 -f tests/compose.core-test.yml down --volumes
 ```
 
 This package's own Compose uses PostgreSQL 18 and Redis 8.2.2 in tmpfs, without
 published ports or user DB bind mounts. It builds the existing Alembic runner
-and waits for migration completion. Only this package's source is mounted.
+and waits for migration completion. The repository root is mounted read only.
 Cargo registry/target caches are disposable project volumes outside Git.
 Test DB trust authentication is confined to this isolated network.
 
@@ -493,7 +493,7 @@ skipped. Remove project/volumes to discard keys, fixtures and build caches.
 
 Stage 4 validation passed:
 
-- cargo fmt --check;
+- cargo fmt --all --check;
 - cargo check --locked;
 - cargo clippy --locked --all-targets -- -D warnings;
 - cargo test --locked: 5 unit + 12 previous core integration + 32 adapter/auth/
@@ -528,68 +528,21 @@ unchanged in a separate disposable project.
 
 ## Stage 5 integration and shared code
 
-Merge origin/main at 401c3db completed without conflicts in technical commit
-949a907fd77e26190a004de53dd4de4dc810a197. All stage 4 implementation changes are
-inside this package. No old/new auth, migration/models, shared Compose, root
-manifest/lock, CI, libs, collectors, contracts or scripts were manually changed.
+The canonical service and D1 migration live under `services/control_panel`.
+Only the 33 owned D1 files moved; legacy team files remain in `control_panel`.
+The root workspace includes this package and keeps its existing MSRV metadata
+at 1.85; only CMDB declares and tests Rust 1.89. Root Cargo.lock retains all
+existing package versions and adds CMDB dependencies. The identical CMDB proto
+lives in `contracts/proto/cronet/cmdb/v1/cmdb.proto`; existing shared contracts
+and collectors retain their APIs.
 
-Root workspace metadata lists contracts, snmp-types, bus, creds, snmp-poller,
-trap-receiver and gnmi-telemetry. CMDB is not a member: root cargo test --workspace
-and the current root Rust CI do NOT exercise this package. An empty local
-[workspace] preserves standalone Cargo behavior after the root manifest appeared;
-read-only metadata was checked from the full repository, not just the isolated
-source mount. Local rustfmt.toml matches the new root formatting conventions.
+The suite now has 52 Rust tests: 5 unit, 12 core and 35 adapter/workflow tests.
+Added coverage exercises schema-aware readiness, graceful SIGTERM/SIGINT and a
+shared-contract client writing inventory subsequently read over HTTP.
+The unchanged migration suite has 27 tests and one head, `8b6e2f4a9c10`.
 
-Both control_panel and services/control_panel exist. The latter has no explicit
-canonical-replacement statement and currently contains only the old Alembic
-chain through 72ca3097da29, without D1 revision 8b6e2f4a9c10. CMDB remains in its
-current location and uses the existing D1 chain. It was not moved or copied.
-
-Stage 5 must decide the canonical layout, integrate CMDB and the D1 migration
-chain together, add root workspace/CI coverage with isolated PG/Redis/protobuf
-setup, provide a runtime image and common Compose service, and agree deployment
-DB/Redis/public-key environment conventions. Discovery/Scheduler/M2M remain
-separate architecture work. No Pull Request was created in stage 4.
-
-## Требуются изменения общего кода
-
-These are stage 5 candidates only, NOT applied. If the current package location
-is retained, the minimal root membership diff is:
-
-```diff
- # Cargo.toml, workspace.members
-+"control_panel/services/cmdb_service",
-```
-
-The package's empty [workspace] must then be removed and its dependency pins
-reconciled into the root Cargo.lock. Root Rust CI must run the integration tests
-with the actual isolated migrated PostgreSQL/Redis/protoc setup; membership alone
-cannot make the present CI job execute them successfully. Exact CI/layout changes
-depend on the canonical-path decision. Do not duplicate CMDB to evade that decision.
-
-The chosen common Compose needs a service along these lines after a runtime
-image has been built (no external port publication is proposed here):
-
-```diff
- services:
-+  cmdb_service:
-+    image: ${CMDB_IMAGE}
-+    environment:
-+      DATABASE_URL: ${CMDB_DATABASE_URL}
-+      REDIS_URL: ${CMDB_REDIS_URL}
-+      JWT_PUBLIC_KEY_PATH: /run/cmdb-public-key.pem
-+    volumes:
-+      - ./crypt_keys/jwt_keys/public_key.pem:/run/cmdb-public-key.pem:ro
-+    depends_on:
-+      database_migrations:
-+        condition: service_completed_successfully
-+      postgres:
-+        condition: service_healthy
-+      redis:
-+        condition: service_healthy
-```
-
-The selected deployment .env.example/documentation would declare CMDB_IMAGE,
-CMDB_DATABASE_URL and CMDB_REDIS_URL placeholders and public-key provisioning.
-Actual credential values must not enter Git. These shared changes, the path
-consolidation and migration transfer require the separate stage 5 scope.
+See `../../README.md` for the opt-in `cmdb` Compose profile, environment/public-key
+setup, root build context, production runtime and isolated CI. Existing Compose
+services are preserved except for the explicitly approved auth port and
+ClickHouse distroless healthcheck corrections. There is no root MSRV change,
+collector refactor, service-account bypass or legacy removal.
