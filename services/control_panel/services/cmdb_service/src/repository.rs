@@ -3,6 +3,7 @@ use crate::{models::*, Result};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+mod discovery;
 mod workflow;
 
 pub struct Repository;

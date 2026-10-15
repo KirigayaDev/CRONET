@@ -5,6 +5,8 @@ import "google/protobuf/struct.proto";
 
 // Existing user access JWT only; service-account identity is not defined yet.
 service Cmdb {
+  // Admin user access JWT; automatic mutations never create manual overrides.
+  rpc ApplyDiscoveryObservation(ApplyDiscoveryObservationRequest) returns (ApplyDiscoveryObservationResponse);
   rpc GetDevice(IdRequest) returns (Device);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc CreateDevice(CreateDeviceRequest) returns (Device);
@@ -17,6 +19,20 @@ service Cmdb {
   rpc CreateIpAddress(CreateIpAddressRequest) returns (IpAddress);
   rpc UpdateIpAddress(UpdateIpAddressRequest) returns (IpAddress);
   rpc GetRack(IdRequest) returns (Rack);
+}
+
+message ApplyDiscoveryObservationRequest {
+ string target_ip = 1;
+ optional string hostname = 2;
+ optional string device_type = 3;
+ optional string vendor = 4;
+ optional string model = 5;
+ optional string serial = 6;
+}
+message ApplyDiscoveryObservationResponse {
+ Device device = 1;
+ bool created = 2;
+ repeated string skipped_fields = 3;
 }
 
 enum LifecycleStatus { LIFECYCLE_STATUS_UNSPECIFIED = 0; ACTIVE = 1; MAINTENANCE = 2; DECOMMISSIONED = 3; }

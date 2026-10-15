@@ -98,6 +98,32 @@ fn parsed_patch<T: std::str::FromStr>(value: Option<pb::StringPatch>, field: &st
 
 #[tonic::async_trait]
 impl pb::cmdb_server::Cmdb for GrpcApi {
+    async fn apply_discovery_observation(
+        &self,
+        mut request: Request<pb::ApplyDiscoveryObservationRequest>,
+    ) -> Result<Response<pb::ApplyDiscoveryObservationResponse>, Status> {
+        let principal = self.authorize(&mut request, true).await?;
+        let mut context = mutation_context(principal, &request);
+        context.source = crate::workflow::Source::Discovery;
+        let service = self.state.service.for_mutation(context);
+        let input = request.into_inner();
+        let applied = service
+            .apply_discovery_observation(crate::discovery::DiscoveryObservation {
+                target_ip: parse(&input.target_ip, "literal IP").map_err(domain_status)?,
+                hostname: input.hostname,
+                device_type: input.device_type,
+                vendor: input.vendor,
+                model: input.model,
+                serial: input.serial,
+            })
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(pb::ApplyDiscoveryObservationResponse {
+            device: Some(applied.device.into()),
+            created: applied.created,
+            skipped_fields: applied.skipped_fields,
+        }))
+    }
     async fn get_device(&self, mut request: Request<pb::IdRequest>) -> Result<Response<pb::Device>, Status> {
         let _principal = self.authorize(&mut request, false).await?;
         let id = uuid(&request.into_inner().id)?;

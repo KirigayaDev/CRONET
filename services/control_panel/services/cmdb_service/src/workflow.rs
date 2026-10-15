@@ -206,6 +206,9 @@ impl Service {
     ) -> Result<()> {
         context.validate()?;
         Repository::append_audit(tx, context, entity, id, action, before, after).await?;
+        if context.source == Source::Discovery {
+            return Ok(());
+        }
         for field in fields {
             if !override_fields(entity).contains(field) {
                 return Err(Error::validation("Unsupported manual override field"));
