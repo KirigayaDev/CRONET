@@ -1045,3 +1045,6 @@ mod workflow_tests;
 
 #[path = "support/integration_tests.rs"]
 mod integration_tests;
+
+#[path = "support/poll_targets_tests.rs"]
+mod poll_targets_tests;

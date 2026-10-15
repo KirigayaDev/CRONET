@@ -6,6 +6,7 @@ pub mod db;
 pub mod error;
 pub mod imports;
 pub mod models;
+pub mod poll_targets;
 pub mod repository;
 pub mod service;
 pub mod workflow;

@@ -5,6 +5,8 @@ import "google/protobuf/struct.proto";
 
 // Existing user access JWT only; service-account identity is not defined yet.
 service Cmdb {
+  // Authenticated read-only inventory projection for Scheduler; no admin role needed.
+  rpc ListPollTargets(ListPollTargetsRequest) returns (ListPollTargetsResponse);
   rpc GetDevice(IdRequest) returns (Device);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc CreateDevice(CreateDeviceRequest) returns (Device);
@@ -17,6 +19,23 @@ service Cmdb {
   rpc CreateIpAddress(CreateIpAddressRequest) returns (IpAddress);
   rpc UpdateIpAddress(UpdateIpAddressRequest) returns (IpAddress);
   rpc GetRack(IdRequest) returns (Rack);
+}
+
+message ListPollTargetsRequest {
+ optional int64 limit = 1;
+ optional string after_device_id = 2;
+}
+message PollTarget {
+ string device_id = 1;
+ optional string hostname = 2;
+ optional string site_id = 3;
+ optional string site_name = 4;
+ // All management endpoints, without INET prefixes; zero/multiple are diagnostic cases.
+ repeated string management_ips = 5;
+}
+message ListPollTargetsResponse {
+ repeated PollTarget targets = 1;
+ optional string next_after_device_id = 2;
 }
 
 enum LifecycleStatus { LIFECYCLE_STATUS_UNSPECIFIED = 0; ACTIVE = 1; MAINTENANCE = 2; DECOMMISSIONED = 3; }

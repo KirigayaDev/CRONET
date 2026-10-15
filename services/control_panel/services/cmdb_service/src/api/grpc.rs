@@ -98,6 +98,35 @@ fn parsed_patch<T: std::str::FromStr>(value: Option<pb::StringPatch>, field: &st
 
 #[tonic::async_trait]
 impl pb::cmdb_server::Cmdb for GrpcApi {
+    async fn list_poll_targets(
+        &self,
+        mut request: Request<pb::ListPollTargetsRequest>,
+    ) -> Result<Response<pb::ListPollTargetsResponse>, Status> {
+        self.authorize(&mut request, false).await?;
+        let input = request.into_inner();
+        let limit = input.limit.unwrap_or(200);
+        let rows = self
+            .state
+            .service
+            .list_poll_targets(limit, optional_uuid(input.after_device_id)?)
+            .await
+            .map_err(domain_status)?;
+        let next_after_device_id =
+            if rows.len() as i64 == limit { rows.last().map(|r| r.device_id.to_string()) } else { None };
+        Ok(Response::new(pb::ListPollTargetsResponse {
+            targets: rows
+                .into_iter()
+                .map(|r| pb::PollTarget {
+                    device_id: r.device_id.to_string(),
+                    hostname: r.hostname,
+                    site_id: r.site_id.map(|id| id.to_string()),
+                    site_name: r.site_name,
+                    management_ips: r.management_ips,
+                })
+                .collect(),
+            next_after_device_id,
+        }))
+    }
     async fn get_device(&self, mut request: Request<pb::IdRequest>) -> Result<Response<pb::Device>, Status> {
         let _principal = self.authorize(&mut request, false).await?;
         let id = uuid(&request.into_inner().id)?;
