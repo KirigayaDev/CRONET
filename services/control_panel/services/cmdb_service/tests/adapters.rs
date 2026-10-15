@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use axum::{
     body::Body,
     http::{Request as HttpRequest, StatusCode},
@@ -1040,3 +1042,6 @@ async fn binary_starts_both_servers_and_rejects_bad_key_configuration() {
 
 #[path = "support/workflow_tests.rs"]
 mod workflow_tests;
+
+#[path = "support/integration_tests.rs"]
+mod integration_tests;

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Requires the disposable DB created by tests/compose.core-test.yml.
 use cmdb_service::{config::Config, db, models::*, repository::Repository, service::RetryPolicy, Error, Service};
 use sqlx::{postgres::PgConnectOptions, PgPool};

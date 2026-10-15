@@ -157,9 +157,9 @@ impl Authenticator {
     }
 
     pub async fn ready(&self) -> bool {
-        let db = tokio::time::timeout(AUTH_TIMEOUT, db::check_connection(&self.pool)).await;
+        let db = tokio::time::timeout(AUTH_TIMEOUT, db::schema_ready(&self.pool)).await;
         let mut redis = self.redis.clone();
         let redis = tokio::time::timeout(AUTH_TIMEOUT, redis::cmd("PING").query_async::<String>(&mut redis)).await;
-        matches!(db, Ok(Ok(()))) && matches!(redis, Ok(Ok(ref value)) if value == "PONG")
+        matches!(db, Ok(Ok(true))) && matches!(redis, Ok(Ok(ref value)) if value == "PONG")
     }
 }

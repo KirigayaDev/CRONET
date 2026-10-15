@@ -6,7 +6,7 @@ use crate::{
 use tonic::{Request, Response, Status};
 
 pub mod pb {
-    tonic::include_proto!("cronet.cmdb.v1");
+    pub use contracts::cronet::cmdb::v1::*;
 }
 
 #[derive(Clone)]

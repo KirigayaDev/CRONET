@@ -52,8 +52,8 @@ impl Config {
             database_url: value.to_owned(),
             redis_url: None,
             public_key_path: None,
-            http_addr: "0.0.0.0:8081".parse().expect("constant address"),
-            grpc_addr: "0.0.0.0:50051".parse().expect("constant address"),
+            http_addr: SocketAddr::from(([0, 0, 0, 0], 8081)),
+            grpc_addr: SocketAddr::from(([0, 0, 0, 0], 50051)),
             jwt_issuer: "Re:simple_videohosting_auth".into(),
             jwt_audience: "Re:simple_videohosting_auth".into(),
         })
