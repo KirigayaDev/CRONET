@@ -1,0 +1,50 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Secrets are resolved locally through credential_ref, never carried on the bus.
+message CliTask {
+  string task_id = 1;
+  string device_id = 2;
+  string target = 3; // Literal IP:port; IPv6 uses [address]:port.
+  string credential_ref = 4;
+  repeated string commands = 5;
+  string prompt_regex = 6; // Empty uses collector policy. Match must end at buffer end.
+  uint32 timeout_ms = 7; // Per command (including initial prompt); zero uses policy.
+  google.protobuf.Timestamp deadline = 8; // Required absolute UTC deadline.
+  optional string encoding = 9; // utf-8 (default) or windows-1251.
+  uint32 attempt = 10;
+}
+
+message CommandOutput {
+  string command = 1;
+  bytes raw_output = 2; // Exact received bytes, including echo/prompt, up to limits.
+  optional string normalized_output = 3; // Decoded terminal text, not parsed metrics.
+  uint64 duration_ms = 4;
+  bool truncated = 5;
+}
+
+message RawCliResult {
+  enum Status {
+    OK = 0;
+    TIMEOUT = 1;
+    AUTH_FAIL = 2;
+    HOST_KEY_FAIL = 3;
+    EXPIRED = 4;
+    CRED_ERROR = 5;
+    BAD_TASK = 6;
+    CONNECTION_ERROR = 7;
+    COMMAND_ERROR = 8;
+  }
+  string task_id = 1;
+  string device_id = 2;
+  string collector_id = 3;
+  google.protobuf.Timestamp collected_at = 4;
+  uint64 duration_ms = 5;
+  Status status = 6;
+  repeated CommandOutput outputs = 7;
+  string error_detail = 8; // Sanitized, fixed diagnostic; never credentials/SSH payload.
+  bool truncated = 9;
+  uint32 attempt = 10;
+}

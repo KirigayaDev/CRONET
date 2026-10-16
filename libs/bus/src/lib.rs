@@ -39,6 +39,8 @@ fn js_err(e: impl std::fmt::Display) -> BusError {
 /// `dev` - на ноутбук и CI (JetStream не создаст стрим, если места на диске меньше лимита).
 #[derive(Debug, Clone, Copy)]
 pub struct StreamLimits {
+    pub tasks_cli: i64,
+    pub raw_cli: i64,
     pub tasks: i64,
     pub raw_snmp: i64,
     pub raw_trap: i64,
@@ -49,11 +51,25 @@ impl StreamLimits {
     const MB: i64 = 1024 * 1024;
 
     pub fn prod() -> Self {
-        Self { tasks: 512 * Self::MB, raw_snmp: 4096 * Self::MB, raw_trap: 2048 * Self::MB, raw_gnmi: 8192 * Self::MB }
+        Self {
+            tasks_cli: 512 * Self::MB,
+            raw_cli: 4096 * Self::MB,
+            tasks: 512 * Self::MB,
+            raw_snmp: 4096 * Self::MB,
+            raw_trap: 2048 * Self::MB,
+            raw_gnmi: 8192 * Self::MB,
+        }
     }
 
     pub fn dev() -> Self {
-        Self { tasks: 32 * Self::MB, raw_snmp: 128 * Self::MB, raw_trap: 64 * Self::MB, raw_gnmi: 128 * Self::MB }
+        Self {
+            tasks_cli: 32 * Self::MB,
+            raw_cli: 128 * Self::MB,
+            tasks: 32 * Self::MB,
+            raw_snmp: 128 * Self::MB,
+            raw_trap: 64 * Self::MB,
+            raw_gnmi: 128 * Self::MB,
+        }
     }
 
     pub fn from_profile(name: &str) -> Option<Self> {
@@ -98,28 +114,34 @@ impl Bus {
     /// `replicas` = 3 в кластере, 1 для локальной разработки.
     pub async fn ensure_streams(&self, replicas: usize, limits: &StreamLimits) -> Result<(), BusError> {
         // Задачи: WorkQueue - сообщение живёт, пока его не подтвердили.
-        self.js
-            .get_or_create_stream(StreamConfig {
-                name: subjects::TASKS_STREAM.into(),
-                subjects: vec![subjects::TASKS_FILTER.into()],
-                retention: RetentionPolicy::WorkQueue,
-                storage: StorageType::File,
-                num_replicas: replicas,
-                // устаревшие задачи бессмысленны: через час удаляются в любом случае
-                max_age: Duration::from_secs(3600),
-                max_bytes: limits.tasks,
-                discard: DiscardPolicy::Old,
-                duplicate_window: Duration::from_secs(120),
-                ..Default::default()
-            })
-            .await
-            .map_err(js_err)?;
+        for (name, filter, max_bytes) in [
+            (subjects::TASKS_STREAM, subjects::TASKS_FILTER, limits.tasks),
+            (subjects::TASKS_CLI_STREAM, subjects::TASKS_CLI_FILTER, limits.tasks_cli),
+        ] {
+            self.js
+                .get_or_create_stream(StreamConfig {
+                    name: name.into(),
+                    subjects: vec![filter.into()],
+                    retention: RetentionPolicy::WorkQueue,
+                    storage: StorageType::File,
+                    num_replicas: replicas,
+                    // устаревшие задачи бессмысленны: через час удаляются в любом случае
+                    max_age: Duration::from_secs(3600),
+                    max_bytes,
+                    discard: DiscardPolicy::Old,
+                    duplicate_window: Duration::from_secs(120),
+                    ..Default::default()
+                })
+                .await
+                .map_err(js_err)?;
+        }
 
         for (name, filter, max_age_h, max_bytes) in [
             (subjects::RAW_SNMP_STREAM, subjects::RAW_SNMP_FILTER, 24u64, limits.raw_snmp),
             // авария, потерянная в core NATS, хуже потерянной точки метрики: трапы тоже в JetStream
             (subjects::RAW_TRAP_STREAM, subjects::RAW_TRAP_FILTER, 72, limits.raw_trap),
             (subjects::RAW_GNMI_STREAM, subjects::RAW_GNMI_FILTER, 24, limits.raw_gnmi),
+            (subjects::RAW_CLI_STREAM, subjects::RAW_CLI_FILTER, 24, limits.raw_cli),
         ] {
             self.js
                 .get_or_create_stream(StreamConfig {

@@ -16,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         netmon.join("poll.proto"),
         netmon.join("trap.proto"),
         netmon.join("gnmi_task.proto"),
+        netmon.join("cli.proto"),
         gnmi,
     ];
 

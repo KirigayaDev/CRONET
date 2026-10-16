@@ -22,6 +22,16 @@ pub mod gnmi_ext {
 
 /// Имена NATS-субъектов и ресурсов JetStream, общие для всех сервисов.
 pub mod subjects {
+    pub fn cli_task(site: &str) -> String {
+        format!("tasks.cli.{site}")
+    }
+    pub fn cli_result(site: &str) -> String {
+        format!("raw.cli.{site}")
+    }
+    pub const TASKS_CLI_STREAM: &str = "TASKS_CLI";
+    pub const TASKS_CLI_FILTER: &str = "tasks.cli.>";
+    pub const RAW_CLI_STREAM: &str = "RAW_CLI";
+    pub const RAW_CLI_FILTER: &str = "raw.cli.>";
     /// Задачи на опрос SNMP конкретной площадки: `tasks.snmp.<site>`.
     pub fn snmp_task(site: &str) -> String {
         format!("tasks.snmp.{site}")
