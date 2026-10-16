@@ -1,0 +1,98 @@
+syntax = "proto3";
+package cronet.cmdb.v1;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// Existing user access JWT only; service-account identity is not defined yet.
+service Cmdb {
+  // Authenticated read-only inventory projection for Scheduler; no admin role needed.
+  rpc ListPollTargets(ListPollTargetsRequest) returns (ListPollTargetsResponse);
+  rpc GetDevice(IdRequest) returns (Device);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc CreateDevice(CreateDeviceRequest) returns (Device);
+  rpc UpdateDevice(UpdateDeviceRequest) returns (Device);
+  rpc DecommissionDevice(IdRequest) returns (Device);
+  rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
+  rpc CreateInterface(CreateInterfaceRequest) returns (Interface);
+  rpc UpdateInterface(UpdateInterfaceRequest) returns (Interface);
+  rpc ListIpAddresses(ListIpAddressesRequest) returns (ListIpAddressesResponse);
+  rpc CreateIpAddress(CreateIpAddressRequest) returns (IpAddress);
+  rpc UpdateIpAddress(UpdateIpAddressRequest) returns (IpAddress);
+  rpc GetRack(IdRequest) returns (Rack);
+}
+
+message ListPollTargetsRequest {
+ optional int64 limit = 1;
+ optional string after_device_id = 2;
+}
+message PollTarget {
+ string device_id = 1;
+ optional string hostname = 2;
+ optional string site_id = 3;
+ optional string site_name = 4;
+ // All management endpoints, without INET prefixes; zero/multiple are diagnostic cases.
+ repeated string management_ips = 5;
+}
+message ListPollTargetsResponse {
+ repeated PollTarget targets = 1;
+ optional string next_after_device_id = 2;
+}
+
+enum LifecycleStatus { LIFECYCLE_STATUS_UNSPECIFIED = 0; ACTIVE = 1; MAINTENANCE = 2; DECOMMISSIONED = 3; }
+message IdRequest { string id = 1; }
+message StringPatch { oneof change { string value = 1; google.protobuf.NullValue clear = 2; } }
+message Int32Patch { oneof change { int32 value = 1; google.protobuf.NullValue clear = 2; } }
+// UUIDs are validated strings; patches use StringPatch for nullable UUID fields.
+message Device {
+ string id = 1; optional string rack_id = 2; optional int32 start_unit = 3;
+ optional int32 height_u = 4; optional string hostname = 5; optional string device_type = 6;
+ optional string vendor = 7; optional string model = 8; optional string serial = 9;
+ LifecycleStatus lifecycle_status = 10;
+ google.protobuf.Timestamp created_at = 11; google.protobuf.Timestamp updated_at = 12;
+}
+message Rack {
+ string id = 1; string room_id = 2; string name = 3; int32 height_u = 4;
+ optional string description = 5; google.protobuf.Timestamp created_at = 6;
+ google.protobuf.Timestamp updated_at = 7;
+}
+message Interface {
+ string id = 1; string device_id = 2; optional int32 if_index = 3; string name = 4;
+ optional string description = 5; optional string interface_type = 6;
+ optional string mac_address = 7; google.protobuf.Timestamp created_at = 8;
+ google.protobuf.Timestamp updated_at = 9;
+}
+message IpAddress {
+ string id = 1; string interface_id = 2; string address = 3; bool is_management = 4;
+ google.protobuf.Timestamp created_at = 5; google.protobuf.Timestamp updated_at = 6;
+}
+message ListDevicesRequest {
+ optional string rack_id = 1; optional string hostname = 2; optional string serial = 3;
+ optional LifecycleStatus lifecycle_status = 4; optional int64 limit = 5; optional int64 offset = 6;
+}
+message ListDevicesResponse { repeated Device devices = 1; }
+message CreateDeviceRequest {
+ optional string rack_id = 1; optional int32 start_unit = 2; optional int32 height_u = 3;
+ optional string hostname = 4; optional string device_type = 5; optional string vendor = 6;
+ optional string model = 7; optional string serial = 8; LifecycleStatus lifecycle_status = 9;
+}
+message UpdateDeviceRequest {
+ string id = 1; StringPatch rack_id = 2; Int32Patch start_unit = 3; Int32Patch height_u = 4;
+ StringPatch hostname = 5; StringPatch device_type = 6; StringPatch vendor = 7;
+ StringPatch model = 8; StringPatch serial = 9; optional LifecycleStatus lifecycle_status = 10;
+}
+message ListInterfacesRequest { string device_id = 1; optional int64 limit = 2; optional int64 offset = 3; }
+message ListInterfacesResponse { repeated Interface interfaces = 1; }
+message CreateInterfaceRequest {
+ string device_id = 1; optional int32 if_index = 2; string name = 3;
+ optional string description = 4; optional string interface_type = 5; optional string mac_address = 6;
+}
+message UpdateInterfaceRequest {
+ string id = 1; optional string device_id = 2; Int32Patch if_index = 3; optional string name = 4;
+ StringPatch description = 5; StringPatch interface_type = 6; StringPatch mac_address = 7;
+}
+message ListIpAddressesRequest { string interface_id = 1; optional int64 limit = 2; optional int64 offset = 3; }
+message ListIpAddressesResponse { repeated IpAddress ip_addresses = 1; }
+message CreateIpAddressRequest { string interface_id = 1; string address = 2; bool is_management = 3; }
+message UpdateIpAddressRequest {
+ string id = 1; optional string interface_id = 2; optional string address = 3; optional bool is_management = 4;
+}

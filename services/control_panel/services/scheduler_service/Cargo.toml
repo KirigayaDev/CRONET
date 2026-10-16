@@ -1,0 +1,40 @@
+[package]
+name = "scheduler-service"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.89"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = "0.46.0"
+async-trait = "0.1"
+bus = { path = "../../../../libs/bus" }
+contracts = { path = "../../../../libs/contracts" }
+snmp-types = { path = "../../../../libs/snmp-types" }
+futures = "0.3"
+hashring = "=0.3.6"
+humantime = "2"
+humantime-serde = "1"
+prost-types = "0.14"
+rand = "0.10"
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "fs", "sync"] }
+tokio-util = { version = "0.7", features = ["time", "rt"] }
+tonic = { version = "0.14", features = ["tls-webpki-roots"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["serde", "v4", "v5"] }
+
+[dev-dependencies]
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto", "use_pem"] }
+prost = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tempfile = "3"
+tokio = { version = "1", features = ["test-util", "process"] }

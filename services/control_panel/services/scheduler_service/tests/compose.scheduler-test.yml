@@ -1,0 +1,112 @@
+# Independent disposable project: synthetic auth, no host ports or production .env.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_DB: cronet_cmdb_test_schema
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs: [/var/lib/postgresql]
+    healthcheck:
+      test: [CMD, pg_isready, -U, cmdb_test, -d, cronet_cmdb_test_schema]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:8.2.2-alpine
+    command: [redis-server, --save, "", --appendonly, "no"]
+    tmpfs: [/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  nats:
+    image: nats:2.11
+    command: [-js, -m, "8222"]
+    tmpfs: [/tmp]
+  nats_ready:
+    image: python:3.12-slim
+    network_mode: service:nats
+    command: [sleep, infinity]
+    depends_on:
+      nats:
+        condition: service_started
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8222/healthz', timeout=2).read()"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  database_migrations:
+    build:
+      context: ../../database_migrations
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_PASSWORD: ""
+      POSTGRES_DB: cronet_cmdb_test_schema
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  auth_fixture:
+    # One-shot synthetic auth setup writes only this project's disposable volume.
+    user: "0:0"
+    build:
+      context: ../../database_migrations
+    entrypoint: [python, -B, /fixture/setup_auth.py]
+    volumes:
+      - ./setup_auth.py:/fixture/setup_auth.py:ro
+      - auth_data:/test-auth
+    depends_on:
+      database_migrations:
+        condition: service_completed_successfully
+  rust:
+    build:
+      context: ../../cmdb_service/tests
+      dockerfile: Dockerfile.rust
+    command: [sleep, infinity]
+    environment:
+      CARGO_TARGET_DIR: /build
+      CMDB_TEST_DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
+      CMDB_TEST_REDIS_URL: redis://redis:6379
+      CMDB_TEST_BINARY: /build/debug/cmdb-service
+      POLLER_TEST_BINARY: /build/debug/snmp-poller
+      SCHEDULER_TEST_NATS_URL: nats://nats:4222
+      SCHEDULER_E2E: "1"
+    volumes:
+      - ../../../../..:/workspace:ro
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_target:/build
+      - auth_data:/test-auth:ro
+    depends_on:
+      auth_fixture:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats_ready:
+        condition: service_healthy
+  snmpsim:
+    image: python:3.12-slim
+    network_mode: service:rust
+    command:
+      - sh
+      - -ec
+      - >-
+        pip install --no-cache-dir snmpsim-lextudio==1.1.1 &&
+        exec snmpsim-command-responder --process-user=nobody --process-group=nogroup
+        --data-dir=/data --agent-udpv4-endpoint=0.0.0.0:1161
+    volumes:
+      - ./snmp:/data:ro
+    depends_on:
+      rust:
+        condition: service_started
+    healthcheck:
+      test: [CMD, python, -c, "import sys; sys.exit(0 if any(line.split()[1].endswith(':0489') for line in open('/proc/net/udp').read().splitlines()[1:]) else 1)"]
+      interval: 1s
+      timeout: 3s
+      start_period: 5s
+      retries: 90
+volumes:
+  cargo_registry:
+  cargo_target:
+  auth_data:

@@ -9,6 +9,8 @@ members = [
     "services/collectors/snmp-poller",
     "services/collectors/trap-receiver",
     "services/collectors/gnmi-telemetry",
+    "services/control_panel/services/cmdb_service",
+    "services/control_panel/services/scheduler_service",
 ]
 
 [workspace.package]

@@ -26,12 +26,72 @@ services:
                 condition: service_healthy
 
         healthcheck:
-            test: [ "CMD", "curl", "http://auth_service/health" ]
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:443/health"]
             interval: 30s
             timeout: 20s
             retries: 3
             start_period: 10s
 
+
+    cmdb_service:
+        profiles: ["cmdb"]
+        build:
+            context: ../..
+            dockerfile: services/control_panel/services/cmdb_service/Dockerfile
+        restart: unless-stopped
+        environment:
+            DATABASE_URL: ${CMDB_DATABASE_URL:-}
+            REDIS_URL: ${CMDB_REDIS_URL:-}
+            JWT_PUBLIC_KEY_PATH: /run/cmdb/public_key.pem
+            JWT_ISSUER: ${JWT_ISSUER:-Re:simple_videohosting_auth}
+            JWT_AUDIENCE: ${JWT_AUDIENCE:-Re:simple_videohosting_auth}
+        ports:
+            - "127.0.0.1:8081:8081"
+            - "127.0.0.1:50051:50051"
+        volumes:
+            - ./crypt_keys/jwt_keys/public_key.pem:/run/cmdb/public_key.pem:ro
+        depends_on:
+            database_migrations:
+                condition: service_completed_successfully
+            redis:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/health/ready"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+
+    scheduler_service:
+        profiles: ["scheduler"]
+        build:
+            context: ../..
+            dockerfile: services/control_panel/services/scheduler_service/Dockerfile
+        restart: unless-stopped
+        environment:
+            NATS_URL: ${SCHEDULER_NATS_URL:-nats://nats:4222}
+            NATS_CREDS_FILE: ${SCHEDULER_NATS_CREDS_FILE:-}
+            CMDB_GRPC_URL: ${SCHEDULER_CMDB_GRPC_URL:-http://cmdb_service:50051}
+            SCHEDULER_CONFIG_PATH: ${SCHEDULER_CONFIG_PATH:-}
+            SCHEDULER_CONFIG_JSON: ${SCHEDULER_CONFIG_JSON:-}
+            CMDB_BEARER_TOKEN_FILE: ${CMDB_BEARER_TOKEN_FILE:-}
+            CMDB_BEARER_TOKEN: ${CMDB_BEARER_TOKEN:-}
+            SCHEDULER_INSTANCE_ID: ${SCHEDULER_INSTANCE_ID:-}
+            SCHEDULER_NAMESPACE: ${SCHEDULER_NAMESPACE:-SCHEDULER}
+            SCHEDULER_RESYNC_INTERVAL: ${SCHEDULER_RESYNC_INTERVAL:-60s}
+            SCHEDULER_HEARTBEAT_INTERVAL: ${SCHEDULER_HEARTBEAT_INTERVAL:-5s}
+            SCHEDULER_MEMBER_TTL: ${SCHEDULER_MEMBER_TTL:-15s}
+            SCHEDULER_CLAIM_TTL: ${SCHEDULER_CLAIM_TTL:-20s}
+            SCHEDULER_BOOTSTRAP_STREAMS: ${SCHEDULER_BOOTSTRAP_STREAMS:-false}
+            SCHEDULER_STREAM_REPLICAS: ${SCHEDULER_STREAM_REPLICAS:-1}
+            SCHEDULER_STREAM_PROFILE: ${SCHEDULER_STREAM_PROFILE:-prod}
+        volumes:
+            - ${SCHEDULER_RUNTIME_DIR:-./scheduler_runtime}:/run/scheduler:ro
+        depends_on:
+            nats:
+                condition: service_healthy
 
     database_migrations:
         build:
@@ -131,7 +191,7 @@ services:
                 hard: 262144
 
         healthcheck:
-            test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping || exit 1"]
+            test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
             interval: 10s
             timeout: 5s
             retries: 3

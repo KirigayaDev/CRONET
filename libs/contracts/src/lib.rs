@@ -20,6 +20,14 @@ pub mod gnmi_ext {
     tonic::include_proto!("gnmi_ext");
 }
 
+pub mod cronet {
+    pub mod cmdb {
+        pub mod v1 {
+            tonic::include_proto!("cronet.cmdb.v1");
+        }
+    }
+}
+
 /// Имена NATS-субъектов и ресурсов JetStream, общие для всех сервисов.
 pub mod subjects {
     /// Задачи на опрос SNMP конкретной площадки: `tasks.snmp.<site>`.
