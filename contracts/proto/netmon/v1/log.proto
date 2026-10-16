@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Normalized by the producer (future C4), ready for storage. Not a raw syslog envelope.
+message LogEvent {
+  // Required, non-nil producer UUID. Batcher preserves it; UUID v7 is recommended for C4.
+  string event_id = 1;
+  google.protobuf.Timestamp event_time = 2;
+  // Absent means the source has not yet been matched to CMDB. Present empty is invalid.
+  optional string device_id = 3;
+  string source_ip = 4;
+  string hostname = 5;
+  uint32 facility = 6;
+  uint32 severity = 7;
+  string app_name = 8;
+  // Arbitrary bytes, including non-UTF-8 and NUL; stored losslessly in ClickHouse String.
+  bytes message = 9;
+  string collector_id = 10;
+  map<string, string> attributes = 11;
+  // Must match the single-token logs.<site> subject.
+  string site = 12;
+}

@@ -39,6 +39,16 @@ pub mod subjects {
         format!("raw.gnmi.{site}")
     }
 
+    /// Normalized metrics, ready for ClickHouse storage.
+    pub fn metric(site: &str) -> String {
+        format!("metrics.{site}")
+    }
+
+    /// Normalized logs, ready for ClickHouse storage.
+    pub fn log(site: &str) -> String {
+        format!("logs.{site}")
+    }
+
     pub const TASKS_STREAM: &str = "TASKS_SNMP";
     pub const TASKS_FILTER: &str = "tasks.snmp.>";
     pub const RAW_SNMP_STREAM: &str = "RAW_SNMP";
@@ -47,6 +57,10 @@ pub mod subjects {
     pub const RAW_TRAP_FILTER: &str = "raw.trap.>";
     pub const RAW_GNMI_STREAM: &str = "RAW_GNMI";
     pub const RAW_GNMI_FILTER: &str = "raw.gnmi.>";
+    pub const METRICS_STREAM: &str = "METRICS";
+    pub const METRICS_FILTER: &str = "metrics.>";
+    pub const LOGS_STREAM: &str = "LOGS";
+    pub const LOGS_FILTER: &str = "logs.>";
     pub const KV_GNMI_DESIRED: &str = "gnmi-desired";
     pub const KV_GNMI_LEASES: &str = "gnmi-leases";
 }
