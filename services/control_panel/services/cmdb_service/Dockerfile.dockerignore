@@ -36,3 +36,4 @@
 **/tests
 **/testdata
 **/examples
+services/control_panel/clickhouse/

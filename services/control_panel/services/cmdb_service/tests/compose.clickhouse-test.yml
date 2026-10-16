@@ -1,0 +1,73 @@
+# Independent, ephemeral D5 project. All passwords are generated at runtime.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_DB: cronet_cmdb_test_schema
+      POSTGRES_PASSWORD: ${D5_TEST_ADMIN_PASSWORD:?Generate ephemeral test passwords}
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cmdb_test", "-d", "cronet_cmdb_test_schema"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  database_migrations:
+    build:
+      context: ../../database_migrations
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_PASSWORD: ${D5_TEST_ADMIN_PASSWORD:?Generate ephemeral test passwords}
+      POSTGRES_DB: cronet_cmdb_test_schema
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.33.6-distroless
+    environment:
+      CLICKHOUSE_USER: d5_test
+      CLICKHOUSE_PASSWORD: ${D5_TEST_CLICKHOUSE_PASSWORD:?Generate ephemeral test passwords}
+      CLICKHOUSE_DB: cronet_cmdb_test_dictionaries
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CMDB_DICTIONARY_PG_HOST: postgres
+      CMDB_DICTIONARY_PG_PORT: "5432"
+      CMDB_DICTIONARY_PG_DATABASE: cronet_cmdb_test_schema
+      CMDB_DICTIONARY_PG_SCHEMA: public
+      CMDB_DICTIONARY_PG_USER: ${D5_TEST_READER_USER:?Generate ephemeral test login}
+      CMDB_DICTIONARY_PG_PASSWORD: ${D5_TEST_READER_PASSWORD:?Generate ephemeral test passwords}
+    volumes:
+      - ../../../clickhouse/cmdb/named-collection.xml:/etc/clickhouse-server/config.d/cmdb-dictionary.xml:ro
+    tmpfs:
+      - /var/lib/clickhouse:uid=101,gid=101,mode=0700
+      - /var/log/clickhouse-server:uid=101,gid=101,mode=0700
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "d5_test", "--password", "${D5_TEST_CLICKHOUSE_PASSWORD:?Generate ephemeral test passwords}", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+  rust:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: ["sleep", "infinity"]
+    environment:
+      CARGO_TARGET_DIR: /build
+      D5_TEST_ADMIN_PASSWORD: ${D5_TEST_ADMIN_PASSWORD:?Generate ephemeral test passwords}
+      D5_TEST_READER_USER: ${D5_TEST_READER_USER:?Generate ephemeral test login}
+      D5_TEST_READER_PASSWORD: ${D5_TEST_READER_PASSWORD:?Generate ephemeral test passwords}
+      D5_TEST_CLICKHOUSE_PASSWORD: ${D5_TEST_CLICKHOUSE_PASSWORD:?Generate ephemeral test passwords}
+      D5_TEST_CLICKHOUSE_URL: http://clickhouse:8123
+    volumes:
+      - ../../../../..:/workspace:ro
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_target:/build
+    depends_on:
+      database_migrations:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+volumes:
+  cargo_registry:
+  cargo_target:

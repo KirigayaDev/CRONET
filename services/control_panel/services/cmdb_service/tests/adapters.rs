@@ -215,7 +215,7 @@ async fn test_pool() -> PgPool {
     let name: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&pool).await.unwrap();
     assert_eq!(name, "cronet_cmdb_test_schema");
     let head: String = sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_one(&pool).await.unwrap();
-    assert_eq!(head, "d4c1a2b3e001");
+    assert_eq!(head, "d5c1a2b3e001");
     pool
 }
 fn redis_url() -> String {

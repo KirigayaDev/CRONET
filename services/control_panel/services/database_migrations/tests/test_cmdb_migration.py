@@ -13,7 +13,9 @@ import psycopg2
 
 PREVIOUS_HEAD = '72ca3097da29'
 D1_HEAD = '8b6e2f4a9c10'
-CMDB_HEAD = 'd4c1a2b3e001'
+D4_HEAD = 'd4c1a2b3e001'
+CMDB_HEAD = 'd5c1a2b3e001'
+DICTIONARY_VIEWS = {'cmdb_clickhouse_devices', 'cmdb_clickhouse_interfaces', 'cmdb_clickhouse_ips'}
 INVENTORY_TABLES = {'inventory_snapshots', 'inventory_components'}
 TABLES = {
     'sites', 'rooms', 'racks', 'devices', 'interfaces', 'ip_addresses',
@@ -97,7 +99,8 @@ class CmdbMigrationTests(unittest.TestCase):
             if alembic('heads') != f'{CMDB_HEAD} (head)':
                 raise AssertionError('Expected exactly one CMDB migration head')
             history = alembic('history')
-            if f'{PREVIOUS_HEAD} -> {D1_HEAD}' not in history or f'{D1_HEAD} -> {CMDB_HEAD}' not in history:
+            if any(f'{a} -> {b}' not in history for a, b in
+                   [(PREVIOUS_HEAD, D1_HEAD), (D1_HEAD, D4_HEAD), (D4_HEAD, CMDB_HEAD)]):
                 raise AssertionError('CMDB must extend the existing migration chain')
             print(f'\nMigration chain: {history}', flush=True)
             alembic('upgrade', PREVIOUS_HEAD)
@@ -172,7 +175,7 @@ class CmdbMigrationTests(unittest.TestCase):
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public'
             """)
-            self.assertEqual({row[0] for row in cursor}, TABLES | INVENTORY_TABLES | {'users', 'alembic_version'})
+            self.assertEqual({row[0] for row in cursor}, TABLES | INVENTORY_TABLES | DICTIONARY_VIEWS | {'users', 'alembic_version'})
             cursor.execute("""
                 SELECT table_name, column_name, udt_name FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = ANY(%s)
@@ -630,6 +633,91 @@ class CmdbMigrationTests(unittest.TestCase):
         self.connection.rollback()
         alembic('upgrade', 'head')
         self.assertEqual(fingerprint(self.connection, TABLES | {'users'}), before)
+
+    def test_dictionary_single_head_extends_d4(self):
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        scripts = ScriptDirectory.from_config(Config(str(MIGRATIONS_ROOT / 'alembic.ini')))
+        self.assertEqual(scripts.get_heads(), [CMDB_HEAD])
+        self.assertEqual(scripts.get_revision(CMDB_HEAD).down_revision, D4_HEAD)
+
+    def test_dictionary_views_columns_and_security_barriers(self):
+        expected = {
+            'cmdb_clickhouse_devices': {'device_id', 'hostname', 'device_type', 'vendor', 'model', 'serial', 'lifecycle_status', 'site_id', 'site_name', 'room_id', 'room_name', 'rack_id', 'rack_name', 'start_unit', 'height_u', 'management_ip'},
+            'cmdb_clickhouse_interfaces': {'interface_id', 'device_id', 'if_index', 'name', 'description', 'interface_type', 'mac_address', 'hostname', 'site_id', 'site_name'},
+            'cmdb_clickhouse_ips': {'ip_id', 'interface_id', 'device_id', 'address', 'is_management', 'address_cidr', 'prefix_length', 'hostname', 'site_id', 'site_name', 'address_count'},
+        }
+        for name, columns in expected.items():
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%s", (name,))
+                self.assertEqual({row[0] for row in cursor}, columns)
+            self.assertIn('security_barrier=true', scalar(self.connection, 'SELECT reloptions FROM pg_class WHERE oid=%s::regclass', (name,)))
+
+    def test_dictionary_role_only_reads_views(self):
+        role = 'cronet_clickhouse_reader'
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,rolreplication,rolbypassrls,rolpassword FROM pg_authid WHERE rolname=%s', (role,))
+            self.assertEqual(cursor.fetchone(), (False, False, False, False, False, False, None))
+        self.assertTrue(scalar(self.connection, "SELECT has_schema_privilege(%s,'public','USAGE')", (role,)))
+        for table in TABLES | INVENTORY_TABLES | {'users'}:
+            self.assertFalse(scalar(self.connection, "SELECT has_table_privilege(%s,%s,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')", (role, table)))
+        for view in DICTIONARY_VIEWS:
+            self.assertTrue(scalar(self.connection, "SELECT has_table_privilege(%s,%s,'SELECT')", (role, view)))
+            self.assertFalse(scalar(self.connection, "SELECT has_table_privilege(%s,%s,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')", (role, view)))
+
+    def test_dictionary_actual_read_and_write_denial(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute('SET LOCAL ROLE cronet_clickhouse_reader')
+            for view in DICTIONARY_VIEWS:
+                cursor.execute(f'SELECT * FROM {view}')
+                cursor.fetchall()
+        for sql in ["INSERT INTO devices(hostname) VALUES ('forbidden')", "UPDATE devices SET hostname='forbidden'", 'DELETE FROM devices', 'SELECT * FROM users']:
+            self.reject(sql, code='42501')
+        # PostgreSQL rejects a non-updatable view during rewrite, before its ACL.
+        self.reject('INSERT INTO cmdb_clickhouse_devices(device_id) VALUES (NULL)', code='55000')
+
+    def test_dictionary_management_ip_is_deterministic_without_device_duplicates(self):
+        device = self.device()
+        interface = self.interface(device)
+        with self.connection.cursor() as cursor:
+            for address in ['2001:db8::1/64', '192.0.2.20/24', '192.0.2.3/24']:
+                cursor.execute('INSERT INTO ip_addresses(interface_id,address,is_management) VALUES (%s,%s,true)', (interface, address))
+        self.assertEqual(scalar(self.connection, 'SELECT count(*) FROM cmdb_clickhouse_devices WHERE device_id=%s', (device,)), 1)
+        self.assertEqual(scalar(self.connection, 'SELECT management_ip FROM cmdb_clickhouse_devices WHERE device_id=%s', (device,)), '192.0.2.3')
+
+    def test_dictionary_unplaced_and_decommissioned_remain_visible(self):
+        device = self.device(height=2, status='decommissioned')
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT lifecycle_status,site_id,site_name,room_id,room_name,rack_id,rack_name,start_unit,height_u FROM cmdb_clickhouse_devices WHERE device_id=%s', (device,))
+            self.assertEqual(cursor.fetchone(), ('decommissioned',) + (None,) * 8)
+
+    def test_dictionary_ipv6_and_duplicate_ip_semantics(self):
+        active = self.device()
+        retired = self.device(status='decommissioned')
+        a, b = self.interface(active), self.interface(retired)
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO ip_addresses(interface_id,address) VALUES (%s,'2001:0db8:0:0:0:0:0:1/64'),(%s,'2001:db8::1/128')", (a, b))
+            cursor.execute("SELECT address,device_id,interface_id,prefix_length,address_count FROM cmdb_clickhouse_ips WHERE address='2001:db8::1'")
+            self.assertEqual(cursor.fetchone(), ('2001:db8::1', active, a, 64, 2))
+
+    def test_dictionary_downgrade_and_repeated_upgrade_preserve_d4(self):
+        before = fingerprint(self.connection, TABLES | INVENTORY_TABLES | {'users'})
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY(%s) ORDER BY viewname", (list(DICTIONARY_VIEWS),))
+            views = cursor.fetchall()
+        self.connection.rollback()
+        alembic('downgrade', D4_HEAD)
+        self.assertEqual(scalar(self.connection, 'SELECT version_num FROM alembic_version'), D4_HEAD)
+        self.assertEqual(scalar(self.connection, "SELECT count(*) FROM pg_roles WHERE rolname='cronet_clickhouse_reader'"), 0)
+        self.assertEqual(scalar(self.connection, 'SELECT count(*) FROM pg_views WHERE schemaname=\'public\' AND viewname=ANY(%s)', (list(DICTIONARY_VIEWS),)), 0)
+        self.assertEqual(fingerprint(self.connection, TABLES | INVENTORY_TABLES | {'users'}), before)
+        self.connection.rollback()
+        alembic('upgrade', 'head')
+        alembic('upgrade', 'head')
+        self.assertEqual(fingerprint(self.connection, TABLES | INVENTORY_TABLES | {'users'}), before)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT viewname,definition FROM pg_views WHERE schemaname='public' AND viewname=ANY(%s) ORDER BY viewname", (list(DICTIONARY_VIEWS),))
+            self.assertEqual(cursor.fetchall(), views)
 
     def test_zzz_downgrade_upgrade_restores_schema_and_preserves_users(self):
         before = fingerprint(self.connection, TABLES | INVENTORY_TABLES)

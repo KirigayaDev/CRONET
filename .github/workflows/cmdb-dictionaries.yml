@@ -1,0 +1,31 @@
+name: CMDB ClickHouse dictionaries
+on:
+  pull_request:
+  push:
+    branches: [main, master, develop, feature/d5-clickhouse-dictionaries]
+permissions:
+  contents: read
+jobs:
+  d5-integration:
+    name: PostgreSQL projections and ClickHouse 25.8 dictGet
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Test dictionaries, refresh and reader permissions
+        run: python -B services/control_panel/services/cmdb_service/tests/run_clickhouse_integration.py
+      - name: Cleanup after cancellation or runner failure
+        if: always()
+        shell: bash
+        run: |
+          # Only this job's runner-local D5 projects; no other services.
+          for project in $(docker ps -a --filter label=com.docker.compose.project --format '{{.Label "com.docker.compose.project"}}' | sort -u | grep '^cronet-d5-' || true); do
+            docker ps -aq --filter "label=com.docker.compose.project=$project" | xargs -r docker rm -f
+            docker volume ls -q --filter "label=com.docker.compose.project=$project" | xargs -r docker volume rm
+            docker network ls -q --filter "label=com.docker.compose.project=$project" | xargs -r docker network rm
+          done

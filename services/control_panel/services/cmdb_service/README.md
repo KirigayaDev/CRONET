@@ -4,7 +4,7 @@ Root workspace member on `feature/d1-cmdb-api`. Stage 4 adds transactional
 audit, manual field ownership and staged CSV device import to the existing
 HTTP/Axum and gRPC/tonic APIs. Both transports share one Service and Authenticator.
 
-The Alembic head is `d4c1a2b3e001` (D4), following D1 `8b6e2f4a9c10`. This package never creates tables,
+The Alembic head is `d5c1a2b3e001` (D5), following D4 `d4c1a2b3e001` and D1 `8b6e2f4a9c10`. This package never creates tables,
 changes schema, reads .env files, or runs migrations itself. Apply the existing
 Alembic chain before startup. The existing audit/override/import tables are
 reused without a new migration. Stage 5 integrates the canonical layout, shared
