@@ -1,10 +1,56 @@
-# syslog-gateway (B1)
+# syslog-gateway (B1/B2)
 
 Receives plaintext UDP/TCP syslog and delivers raw protobuf transport envelopes
 to JetStream. No vendor parsing, RFC3164/RFC5424 timestamp interpretation,
 ClickHouse insert, CLI, NETCONF or voice processing happens here.
-TLS and RELP belong to B2. Deploy B1 on trusted networks; use a TLS-capable ingress
-for untrusted networks until B2 is available.
+Plain UDP/TCP listeners retain their B1 behavior. Optional B2 TLS adds server
+authentication or mandatory client authentication (mTLS) on a separate listener.
+Use TLS on untrusted networks and restrict access to plaintext endpoints.
+
+## TLS (B2)
+
+TLS is disabled unless `SYSLOG_TLS_ADDR` is set (typically `0.0.0.0:6514`).
+Then `SYSLOG_TLS_CERT_FILE` and `SYSLOG_TLS_KEY_FILE` are required PEM file paths.
+`SYSLOG_TLS_CLIENT_CA_FILE` enables mandatory mTLS: missing or untrusted client
+identities fail the handshake. Without a client CA, only the server authenticates.
+Cert/key/CA settings without an enabled TLS listener are configuration errors.
+Bad paths, PEM, mismatched keys and expired/not-yet-valid certificates fail startup.
+
+TLS 1.2/1.3 use rustls with the ring provider. Certificate parsing and current
+validity checks use x509-parser; rustls checks the key/certificate match and verifies
+mTLS chains. PEM files are bounded to 1 MiB each, and temporary key buffers are
+zeroized. `rcgen` is a dev dependency only; tests generate all identities at runtime.
+
+`SYSLOG_TLS_RELOAD_SECS` defaults to 30 (1–86400). Bounded polling reads content,
+validates a full replacement and atomically swaps its `Arc<ServerConfig>` through
+ArcSwap when content changes. Invalid replacements retain the previous config.
+New connections get the new config; established sessions keep running. Rotate
+the pair together; an intermediate mismatched pair is rejected and retried on the
+next poll. Mount the secret directory so file replacement is visible to polling.
+Existing sessions retain their authentication state until closed.
+
+TLS shares B1's `SyslogCodec`, frame limits, idle deadline, durable Intake, redb
+spool and publisher. Envelope transport is additive `TLS=3`; `UDP=1`/`TCP=2` and
+all existing protobuf fields stay unchanged. `SYSLOG_MAX_CONNECTIONS` bounds each
+listener, including handshakes. `SYSLOG_TLS_HANDSHAKE_SECS` defaults to 10 (1–60).
+The plaintext listeners are still enabled by their existing configuration.
+
+Mount certificate/key files read-only at runtime, readable by UID 10001; never
+put key contents in environment variables or images. Example additions to the
+Docker command below:
+
+```sh
+--mount type=bind,src=/srv/syslog-tls,dst=/run/syslog-tls,readonly \
+-e SYSLOG_TLS_ADDR=0.0.0.0:6514 -p 6514:6514/tcp \
+-e SYSLOG_TLS_CERT_FILE=/run/syslog-tls/server.pem \
+-e SYSLOG_TLS_KEY_FILE=/run/syslog-tls/server.key
+# Optional: -e SYSLOG_TLS_CLIENT_CA_FILE=/run/syslog-tls/client-ca.pem
+```
+
+The existing Compose `syslog` profile requires no certificate mounts and remains
+compatible. Add TLS environment, read-only secret mounts and a 6514 port mapping
+in a local Compose override when TLS is needed. The production image contains no
+generated certificates or private keys.
 
 UDP: one datagram per event; non-UTF8 and empty payloads are valid. A fixed 64 KiB
 receive buffer captures the entire IP datagram. Payload above the configured

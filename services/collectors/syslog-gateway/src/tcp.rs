@@ -7,8 +7,9 @@ use crate::{
 };
 use contracts::netmon::v1::SyslogTransport;
 use futures::StreamExt;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
+    io::AsyncRead,
     net::{TcpListener, TcpStream},
     sync::Semaphore,
     task::JoinSet,
@@ -17,6 +18,18 @@ use tokio_util::{codec::FramedRead, sync::CancellationToken};
 
 async fn connection(socket: TcpStream, cfg: Arc<Config>, intake: Intake, stop: CancellationToken) -> Result<()> {
     let peer = socket.peer_addr()?;
+    session(socket, peer, cfg, intake, stop, SyslogTransport::Tcp).await
+}
+
+/// Plain TCP and TLS share exactly the same bounded message codec and Intake.
+pub(crate) async fn session<S: AsyncRead + Unpin>(
+    socket: S,
+    peer: SocketAddr,
+    cfg: Arc<Config>,
+    intake: Intake,
+    stop: CancellationToken,
+    transport: SyslogTransport,
+) -> Result<()> {
     let mut frames = FramedRead::new(socket, SyslogCodec::new(cfg.max_frame));
     loop {
         // A whole-frame deadline also bounds slowloris clients that trickle bytes.
@@ -25,10 +38,10 @@ async fn connection(socket: TcpStream, cfg: Arc<Config>, intake: Intake, stop: C
             frame = tokio::time::timeout(cfg.idle_timeout, frames.next()) => match frame {
                 Ok(Some(Ok(frame))) => frame,
                 Ok(None) | Err(_) => return Ok(()),
-                Ok(Some(Err(_))) => { tracing::debug!(transport = "tcp", source_ip = %peer.ip(), status = "invalid_frame", "TCP connection closed"); return Ok(()); }
+                Ok(Some(Err(_))) => { tracing::debug!(transport = transport as i32, source_ip = %peer.ip(), status = "invalid_frame", "syslog connection closed"); return Ok(()); }
             },
         };
-        let event = envelope(&cfg, peer, SyslogTransport::Tcp, frame);
+        let event = envelope(&cfg, peer, transport, frame);
         // At most one frame per connection awaits a durable commit. No further read.
         tokio::select! { _ = stop.cancelled() => return Ok(()), result = intake.tcp(event) => result? }
     }

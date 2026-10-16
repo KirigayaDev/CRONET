@@ -2,9 +2,9 @@ name: Syslog integration
 
 on:
   push:
-    branches: [main, master, develop, feature/b1-syslog-gateway]
+    branches: [main, master, develop, feature/b1-syslog-gateway, feature/b2-syslog-tls-relp]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, feature/b1-syslog-gateway]
 
 permissions:
   contents: read

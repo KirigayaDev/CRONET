@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 async-nats = "0.46.0"
+arc-swap = "1.7.1"
 bus = { version = "0.1.0", path = "../../../libs/bus" }
 bytes = "1.12.1"
 contracts = { version = "0.1.0", path = "../../../libs/contracts" }
@@ -18,15 +19,22 @@ futures = "0.3.34"
 prost = "0.14.4"
 prost-types = "0.14.4"
 redb = "=2.6.3"
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2.2.0"
+sha2 = "0.10.9"
 socket2 = "0.6.5"
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "io-util"] }
 tokio-util = { version = "0.7.20", features = ["codec", "rt"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 uuid = { version = "1.26.1", features = ["v4"] }
+x509-parser = "0.18.0"
+zeroize = "1.9.1"
 
 [dev-dependencies]
+rcgen = "0.14.4"
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 tokio = { version = "1.53.2", features = ["process"] }

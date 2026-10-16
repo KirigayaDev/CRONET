@@ -5,6 +5,7 @@ pub mod model;
 pub mod publisher;
 pub mod spool;
 pub mod tcp;
+pub mod tls;
 pub mod udp;
 
 use crate::{
@@ -117,6 +118,20 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
     let max = cfg.spool_max_bytes;
     let spool = Arc::new(tokio::task::spawn_blocking(move || Spool::open(&path, max)).await.map_err(|_| Error::Task)??);
     let stats = blocking(spool.clone(), Spool::stats).await?;
+    let tls_manager = if let Some(settings) = cfg.tls.clone() {
+        Some(Arc::new(
+            tokio::task::spawn_blocking(move || tls::ReloadingTls::new(settings)).await.map_err(|_| Error::Task)??,
+        ))
+    } else {
+        None
+    };
+    let tls_listener =
+        if let Some(addr) = cfg.tls_addr { Some(tokio::net::TcpListener::bind(addr).await?) } else { None };
+    let tls_addr = tls_listener
+        .as_ref()
+        .map(|listener| listener.local_addr())
+        .transpose()?
+        .map_or_else(|| "disabled".into(), |addr| addr.to_string());
     let udp = udp::bind(cfg.udp_addr, cfg.udp_rcvbuf)?;
     let tcp = tokio::net::TcpListener::bind(cfg.tcp_addr).await?;
     let udp_addr = udp.local_addr()?;
@@ -129,6 +144,10 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
     let mut tasks = JoinSet::new();
     tasks.spawn(udp::listen(udp, cfg.clone(), intake.clone(), stop.clone()));
     tasks.spawn(tcp::listen(tcp, cfg.clone(), intake.clone(), stop.clone()));
+    if let (Some(listener), Some(tls)) = (tls_listener, tls_manager) {
+        tasks.spawn(tls.clone().watch(stop.clone()));
+        tasks.spawn(tls::listen(listener, cfg.clone(), tls, intake.clone(), stop.clone()));
+    }
     tasks.spawn(publisher::run(cfg.clone(), spool.clone(), wake.clone(), publisher_stop.clone()));
     // Move rx to a separate task; pass drops separately to avoid a sender cycle.
     let drops = intake.drops.clone();
@@ -137,7 +156,7 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
     let writer_wake = wake.clone();
     let writer_handle = tokio::spawn(writer(rx, writer_spool, drops, writer_wake, writer_stop));
     drop(intake);
-    tracing::info!(site = %cfg.site, gateway_id = %cfg.gateway_id, %udp_addr, %tcp_addr,
+    tracing::info!(site = %cfg.site, gateway_id = %cfg.gateway_id, %udp_addr, %tcp_addr, %tls_addr,
         spool_depth = stats.pending, spool_bytes = stats.used_bytes, quarantined = stats.quarantined,
         status = "ready", "syslog listeners ready");
 

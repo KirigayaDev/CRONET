@@ -106,7 +106,7 @@ fn decode(record: &[u8]) -> Result<RawSyslogEvent> {
         || event.site.len() > 128
         || !event.site.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
         || event.payload.len() > 65536
-        || !matches!(event.transport, 1 | 2)
+        || !matches!(event.transport, 1..=3)
     {
         return Err(Error::Corrupt);
     }

@@ -22,6 +22,11 @@ use tokio::{
     sync::mpsc,
 };
 
+#[path = "cases/certs.rs"]
+mod certificates;
+#[path = "cases/tls.rs"]
+mod tls_cases;
+
 fn port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
@@ -74,9 +79,13 @@ struct Gateway {
     logs: mpsc::Receiver<Value>,
     udp: SocketAddr,
     tcp: SocketAddr,
+    ready: Value,
 }
 impl Gateway {
     async fn start(path: &Path, nats_port: u16, frame_limit: usize) -> Self {
+        Self::start_with(path, nats_port, frame_limit, &[]).await
+    }
+    async fn start_with(path: &Path, nats_port: u16, frame_limit: usize, extra: &[(&str, String)]) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_syslog-gateway"))
             .env_clear()
             .env("NATS_URL", url(nats_port))
@@ -92,6 +101,7 @@ impl Gateway {
             .env("SYSLOG_SPOOL_PATH", path)
             .env("SYSLOG_SPOOL_MAX_BYTES", MIN_SPOOL_BYTES.to_string())
             .env("RUST_LOG", "syslog_gateway=debug,async_nats::connector=trace")
+            .envs(extra.iter().map(|(key, value)| (*key, value)))
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
@@ -104,18 +114,28 @@ impl Gateway {
             while let Ok(Some(line)) = lines.next_line().await {
                 // Gateway logs are transport metadata; the test never prints payload.
                 let log = serde_json::from_str::<Value>(&line).expect("structured gateway log");
+                assert!(!line.contains("PRIVATE KEY") && !line.contains("BEGIN CERTIFICATE"));
                 assert!(log["target"].as_str().is_none_or(|target| !target.starts_with("async_nats")));
                 if tx.send(log["fields"].clone()).await.is_err() {
                     break;
                 }
             }
         });
-        let mut gateway =
-            Self { child, logs, udp: "127.0.0.1:0".parse().unwrap(), tcp: "127.0.0.1:0".parse().unwrap() };
+        let mut gateway = Self {
+            child,
+            logs,
+            udp: "127.0.0.1:0".parse().unwrap(),
+            tcp: "127.0.0.1:0".parse().unwrap(),
+            ready: Value::Null,
+        };
         let ready = gateway.wait("ready").await;
         gateway.udp = ready["udp_addr"].as_str().unwrap().parse().unwrap();
         gateway.tcp = ready["tcp_addr"].as_str().unwrap().parse().unwrap();
+        gateway.ready = ready;
         gateway
+    }
+    fn addr(&self, name: &str) -> SocketAddr {
+        self.ready[name].as_str().unwrap().parse().unwrap()
     }
     async fn wait(&mut self, status: &str) -> Value {
         tokio::time::timeout(Duration::from_secs(20), async {

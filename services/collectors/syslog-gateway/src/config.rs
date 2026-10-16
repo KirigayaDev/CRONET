@@ -16,12 +16,29 @@ const KEYS: &[&str] = &[
     "SYSLOG_REPLAY_BATCH",
     "SYSLOG_SHUTDOWN_SECS",
     "SYSLOG_UDP_RCVBUF_BYTES",
+    "SYSLOG_TLS_ADDR",
+    "SYSLOG_TLS_CERT_FILE",
+    "SYSLOG_TLS_KEY_FILE",
+    "SYSLOG_TLS_CLIENT_CA_FILE",
+    "SYSLOG_TLS_RELOAD_SECS",
+    "SYSLOG_TLS_HANDSHAKE_SECS",
 ];
+
+#[derive(Clone)]
+pub struct TlsSettings {
+    pub cert_file: PathBuf,
+    pub key_file: PathBuf,
+    pub client_ca_file: Option<PathBuf>,
+    pub reload_interval: Duration,
+    pub handshake_timeout: Duration,
+}
 
 #[derive(Clone)]
 pub struct Config {
     pub udp_addr: SocketAddr,
     pub tcp_addr: SocketAddr,
+    pub tls_addr: Option<SocketAddr>,
+    pub tls: Option<TlsSettings>,
     pub site: String,
     pub gateway_id: String,
     pub max_frame: usize,
@@ -119,7 +136,46 @@ impl Config {
         }
         let stream_limits = bus::StreamLimits::from_profile(&text(&env, "NETMON_STREAM_PROFILE", "dev"))
             .ok_or_else(|| invalid("NETMON_STREAM_PROFILE"))?;
+        let tls_addr = env
+            .get("SYSLOG_TLS_ADDR")
+            .map(|value| value.parse().map_err(|_| invalid("SYSLOG_TLS_ADDR")))
+            .transpose()?;
+        let tls = if tls_addr.is_some() {
+            let path = |name: &str| -> Result<PathBuf> {
+                let value = env.get(name).ok_or_else(|| invalid(name))?;
+                let path = PathBuf::from(value);
+                if value.is_empty() || !path.is_file() {
+                    return Err(invalid(name));
+                }
+                Ok(path)
+            };
+            let reload = parse(&env, "SYSLOG_TLS_RELOAD_SECS", 30u64)?;
+            let handshake = parse(&env, "SYSLOG_TLS_HANDSHAKE_SECS", 10u64)?;
+            if !(1..=86400).contains(&reload) {
+                return Err(invalid("SYSLOG_TLS_RELOAD_SECS"));
+            }
+            if !(1..=60).contains(&handshake) {
+                return Err(invalid("SYSLOG_TLS_HANDSHAKE_SECS"));
+            }
+            Some(TlsSettings {
+                cert_file: path("SYSLOG_TLS_CERT_FILE")?,
+                key_file: path("SYSLOG_TLS_KEY_FILE")?,
+                client_ca_file: env
+                    .get("SYSLOG_TLS_CLIENT_CA_FILE")
+                    .map(|_| path("SYSLOG_TLS_CLIENT_CA_FILE"))
+                    .transpose()?,
+                reload_interval: Duration::from_secs(reload),
+                handshake_timeout: Duration::from_secs(handshake),
+            })
+        } else {
+            if KEYS.iter().filter(|name| name.starts_with("SYSLOG_TLS_")).any(|name| env.contains_key(*name)) {
+                return Err(Error::Config("TLS settings require SYSLOG_TLS_ADDR".into()));
+            }
+            None
+        };
         Ok(Self {
+            tls_addr,
+            tls,
             udp_addr: parse(
                 &env,
                 "SYSLOG_UDP_ADDR",
@@ -161,6 +217,8 @@ mod tests {
         let cfg = Config::from_map(base.clone()).unwrap();
         assert_eq!(cfg.max_frame, 65536);
         assert_eq!(cfg.udp_addr.port(), 5514);
+        assert!(cfg.tls_addr.is_none());
+        assert!(cfg.tls.is_none());
         for (key, value) in [
             ("NETMON_SITE", ""),
             ("NETMON_SITE", "a.b"),
@@ -185,6 +243,10 @@ mod tests {
             ("NETMON_BOOTSTRAP_STREAMS", "yes"),
             ("SYSLOG_TYPO", "1"),
             ("NATS_CREDS_FILE", ""),
+            ("SYSLOG_TLS_ADDR", "bad"),
+            ("SYSLOG_TLS_ADDR", "127.0.0.1:6514"),
+            ("SYSLOG_TLS_CERT_FILE", "unused.pem"),
+            ("SYSLOG_TLS_RELOAD_SECS", "0"),
         ] {
             let mut values = base.clone();
             values.insert(key.into(), value.into());

@@ -15,6 +15,6 @@ RUN apt-get update \
 COPY --from=builder /build/target/release/syslog-gateway /usr/local/bin/syslog-gateway
 ENV SYSLOG_SPOOL_PATH=/var/lib/cronet/syslog/spool.redb
 USER 10001:10001
-EXPOSE 5514/udp 5514/tcp
+EXPOSE 5514/udp 5514/tcp 6514/tcp
 VOLUME ["/var/lib/cronet/syslog"]
 ENTRYPOINT ["/usr/local/bin/syslog-gateway"]

@@ -14,6 +14,8 @@ pub enum Error {
     Task,
     #[error("NATS configuration or credentials could not be loaded")]
     NatsConfig,
+    #[error("TLS configuration: {0}")]
+    Tls(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
