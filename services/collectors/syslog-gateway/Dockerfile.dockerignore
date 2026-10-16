@@ -1,0 +1,26 @@
+# Allow only build inputs. No tests, environments, keys, logs or reports enter
+# even the builder context. Runtime copies only the release binary.
+**
+!Cargo.toml
+!Cargo.lock
+!libs/
+!libs/**/
+!libs/**/Cargo.toml
+!libs/**/build.rs
+!libs/**/src/**
+!contracts/
+!contracts/proto/
+!contracts/proto/**
+!services/
+!services/collectors/
+!services/collectors/**/
+!services/collectors/**/Cargo.toml
+!services/collectors/**/src/**
+**/tests/**
+**/fixtures/**
+**/reports/**
+**/.env*
+**/*.log
+**/*.key
+**/*.pem
+**/crypt_keys/**

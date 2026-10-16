@@ -43,17 +43,30 @@ pub struct StreamLimits {
     pub raw_snmp: i64,
     pub raw_trap: i64,
     pub raw_gnmi: i64,
+    pub raw_syslog: i64,
 }
 
 impl StreamLimits {
     const MB: i64 = 1024 * 1024;
 
     pub fn prod() -> Self {
-        Self { tasks: 512 * Self::MB, raw_snmp: 4096 * Self::MB, raw_trap: 2048 * Self::MB, raw_gnmi: 8192 * Self::MB }
+        Self {
+            tasks: 512 * Self::MB,
+            raw_snmp: 4096 * Self::MB,
+            raw_trap: 2048 * Self::MB,
+            raw_gnmi: 8192 * Self::MB,
+            raw_syslog: 8192 * Self::MB,
+        }
     }
 
     pub fn dev() -> Self {
-        Self { tasks: 32 * Self::MB, raw_snmp: 128 * Self::MB, raw_trap: 64 * Self::MB, raw_gnmi: 128 * Self::MB }
+        Self {
+            tasks: 32 * Self::MB,
+            raw_snmp: 128 * Self::MB,
+            raw_trap: 64 * Self::MB,
+            raw_gnmi: 128 * Self::MB,
+            raw_syslog: 128 * Self::MB,
+        }
     }
 
     pub fn from_profile(name: &str) -> Option<Self> {
@@ -120,6 +133,8 @@ impl Bus {
             // авария, потерянная в core NATS, хуже потерянной точки метрики: трапы тоже в JetStream
             (subjects::RAW_TRAP_STREAM, subjects::RAW_TRAP_FILTER, 72, limits.raw_trap),
             (subjects::RAW_GNMI_STREAM, subjects::RAW_GNMI_FILTER, 24, limits.raw_gnmi),
+            // Logs outlive operational metrics: 72h, with the same bounded Limits policy.
+            (subjects::RAW_SYSLOG_STREAM, subjects::RAW_SYSLOG_FILTER, 72, limits.raw_syslog),
         ] {
             self.js
                 .get_or_create_stream(StreamConfig {
