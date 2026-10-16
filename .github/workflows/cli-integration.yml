@@ -1,0 +1,64 @@
+name: B3 CLI integration
+on:
+  push:
+    branches: [main, master, develop, feature/b3-cli-collector]
+  pull_request:
+    branches: [main, master, develop]
+permissions:
+  contents: read
+jobs:
+  cli-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo check --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Extract official NATS test server
+        run: |
+          docker create --name cli-test-nats nats:2.11
+          docker cp cli-test-nats:/nats-server "$RUNNER_TEMP/nats-server"
+          docker rm cli-test-nats
+          chmod +x "$RUNNER_TEMP/nats-server"
+      - name: Real SSH, two collector processes, JetStream ACK and shutdown
+        env:
+          CLI_E2E: "1"
+          NATS_SERVER: ${{ runner.temp }}/nats-server
+        run: cargo test -p cli-collector --locked -- --test-threads=1
+      - name: Build production image
+        run: docker build -f services/collectors/cli-collector/Dockerfile -t cli-collector:b3-ci .
+      - name: Run E2E against release collector inside non-root production runtime
+        run: |
+          # Compile the harness against bookworm libc too; Ubuntu host executables
+          # may depend on a newer glibc than the production runtime provides.
+          mkdir -p "$RUNNER_TEMP/cli-harness"
+          docker run --rm \
+            --mount "type=bind,source=$PWD,target=/workspace,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/cli-harness,target=/out" \
+            -w /workspace -e CARGO_TARGET_DIR=/out rust:1.99-bookworm \
+            sh -ec 'cargo test -p cli-collector --test e2e --no-run --locked --message-format=json > /out/artifacts.json'
+          test_bin="$(python3 -c 'import json,sys; a=[json.loads(l) for l in open(sys.argv[1])]; p=next(x["executable"] for x in a if x.get("reason")=="compiler-artifact" and x.get("target",{}).get("name")=="e2e" and x.get("executable")); print(sys.argv[2]+p.removeprefix("/out"))' "$RUNNER_TEMP/cli-harness/artifacts.json" "$RUNNER_TEMP/cli-harness")"
+          docker run --rm \
+            --mount "type=bind,source=$test_bin,target=/tmp/cli-e2e,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/nats-server,target=/tmp/nats-server,readonly" \
+            -e CLI_E2E=1 -e NATS_SERVER=/tmp/nats-server \
+            -e CLI_TEST_COLLECTOR_BIN=/usr/local/bin/cli-collector \
+            --entrypoint /tmp/cli-e2e cli-collector:b3-ci --test-threads=1
+      - name: Check runtime isolation and hygiene
+        run: |
+          test "$(docker image inspect cli-collector:b3-ci --format '{{.Config.User}}')" = '65532:65532'
+          docker run --rm --entrypoint sh cli-collector:b3-ci -ec '
+            test -x /usr/local/bin/cli-collector
+            test ! -e /src
+            test ! -e /workspace
+            test ! -e /usr/local/cargo
+            test ! -e /usr/local/bin/nats-server
+            test -z "$(find / -xdev \( -name known_hosts -o -name .env -o -name fixtures -o -name reports -o -name tests -o -name id_ed25519 \) -print 2>/dev/null)"
+          '
