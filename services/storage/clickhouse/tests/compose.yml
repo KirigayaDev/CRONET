@@ -1,0 +1,33 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8-distroless
+    environment:
+      CLICKHOUSE_USER: schema_test
+      CLICKHOUSE_PASSWORD: synthetic-clickhouse-test-only
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    # No host ports, persistent data, production configuration, or shell required.
+    tmpfs:
+      - /var/lib/clickhouse:uid=101,gid=101,mode=0750
+      - /var/log/clickhouse-server:uid=101,gid=101,mode=0750
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "/usr/bin/clickhouse", "client", "--user", "schema_test", "--password", "synthetic-clickhouse-test-only", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+  integration:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: schema_test
+      CLICKHOUSE_PASSWORD: synthetic-clickhouse-test-only
+      DATABASE_URL: clickhouse://schema_test:synthetic-clickhouse-test-only@clickhouse:9000/cronet
+    depends_on:
+      clickhouse:
+        condition: service_healthy
