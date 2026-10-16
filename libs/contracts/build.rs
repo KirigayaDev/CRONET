@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         netmon.join("trap.proto"),
         netmon.join("gnmi_task.proto"),
         gnmi,
+        root.join("cronet/cmdb/v1/cmdb.proto"),
     ];
 
     let include = protoc_bin_vendored::include_path()?;
