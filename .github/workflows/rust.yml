@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master", "develop" ]
+    branches: [ "main", "master", "develop", "feature/b1-syslog-gateway" ]
   schedule:
     - cron: '0 2 * * *'
 

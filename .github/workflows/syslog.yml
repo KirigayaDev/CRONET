@@ -1,0 +1,44 @@
+name: Syslog integration
+
+on:
+  push:
+    branches: [main, master, develop, feature/b1-syslog-gateway, feature/b2-syslog-tls-relp]
+  pull_request:
+    branches: [main, master, develop, feature/b1-syslog-gateway]
+
+permissions:
+  contents: read
+
+jobs:
+  syslog-integration:
+    name: Syslog UDP, TCP, TLS, mTLS, RELP and durable replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Extract isolated NATS test executable
+        run: |
+          docker create --name syslog-nats-tools nats:2.11
+          docker cp syslog-nats-tools:/nats-server "$RUNNER_TEMP/nats-server"
+          docker rm syslog-nats-tools
+          chmod +x "$RUNNER_TEMP/nats-server"
+          echo "NATS_SERVER=$RUNNER_TEMP/nats-server" >> "$GITHUB_ENV"
+      - run: cargo test -p syslog-gateway --locked
+      - name: Real sockets, TLS rotation, RELP durable ACK, outage and replay
+        run: cargo test -p syslog-gateway --test e2e --locked -- --ignored --test-threads=1
+      - name: Build production image
+        run: docker build -f services/collectors/syslog-gateway/Dockerfile -t cronet/syslog-gateway:ci .
+      - name: Verify runtime isolation and identity
+        run: |
+          test "$(docker inspect cronet/syslog-gateway:ci --format '{{.Config.User}}')" = '10001:10001'
+          docker run --rm --entrypoint sh cronet/syslog-gateway:ci -c '
+            test -x /usr/local/bin/syslog-gateway &&
+            test "$(stat -c %a /var/lib/cronet/syslog)" = 700 &&
+            test -z "$(ls -A /var/lib/cronet/syslog)" &&
+            test ! -d /build && test ! -d /workspace && test ! -d /app &&
+            test -z "$(find / -name Cargo.toml -o -name Cargo.lock -o -name syslog.proto -o -name server.key -o -name server.pem -o -name fixtures -o -name reports -o -name .env 2>/dev/null)"
+          '

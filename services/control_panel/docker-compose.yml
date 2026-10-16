@@ -1,4 +1,26 @@
 services:
+    syslog_gateway:
+        profiles: ["syslog"]
+        build:
+            context: ../..
+            dockerfile: services/collectors/syslog-gateway/Dockerfile
+        restart: unless-stopped
+        read_only: true
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        environment:
+            NETMON_SITE: ${NETMON_SITE:-dev}
+            NATS_URL: ${NATS_URL:-nats://nats:4222}
+            NETMON_STREAM_PROFILE: ${NETMON_STREAM_PROFILE:-dev}
+            SYSLOG_SPOOL_PATH: /var/lib/cronet/syslog/spool.redb
+        ports:
+            - "5514:5514/udp"
+            - "5514:5514/tcp"
+        volumes:
+            - syslog_spool:/var/lib/cronet/syslog
+        depends_on:
+            nats:
+                condition: service_started
     auth_service:
         build:
             context: ./services/auth_service
@@ -152,3 +174,6 @@ services:
             nofile:
                 soft: 65535
                 hard: 65535
+
+volumes:
+    syslog_spool:
