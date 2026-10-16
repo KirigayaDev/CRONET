@@ -13,6 +13,10 @@
 !services/storage/metrics-batcher/Cargo.toml
 !services/storage/metrics-batcher/src/
 !services/storage/metrics-batcher/src/**
+!services/storage/logs-batcher/
+!services/storage/logs-batcher/Cargo.toml
+!services/storage/logs-batcher/src/
+!services/storage/logs-batcher/src/**
 **/tests
 **/tests/**
 **/fixtures/**
@@ -20,6 +24,7 @@
 **/logs/**
 **/target/**
 **/.env*
+**/*.creds
 **/*.pem
 **/*.key
 **/keys/**

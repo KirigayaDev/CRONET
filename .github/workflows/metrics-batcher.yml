@@ -1,7 +1,7 @@
 name: Metrics batcher integration
 on:
   push:
-    branches: ["main", "master", "develop", "feature/c2-metrics-batcher"]
+    branches: ["main", "master", "develop", "feature/c2-metrics-batcher", "feature/c3-logs-batcher"]
   pull_request:
     branches: ["main", "master", "develop"]
   workflow_dispatch:
