@@ -27,6 +27,10 @@
 !services/control_panel/services/cmdb_service/Cargo.toml
 !services/control_panel/services/cmdb_service/src/
 !services/control_panel/services/cmdb_service/src/**
+!services/control_panel/services/scheduler_service/
+!services/control_panel/services/scheduler_service/Cargo.toml
+!services/control_panel/services/scheduler_service/src/
+!services/control_panel/services/scheduler_service/src/**
 **/.env
 **/.env.*
 **/*.pem

@@ -118,3 +118,24 @@ jobs:
       - name: Cleanup isolated migration environment
         if: always()
         run: docker compose down --volumes
+
+  scheduler-e2e:
+    name: Scheduler JetStream coordination and CMDB acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: cronet-scheduler-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_FILE: services/control_panel/services/scheduler_service/tests/compose.scheduler-test.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start isolated Scheduler environment
+        run: docker compose up -d --build --wait snmpsim
+      - name: Build existing CMDB and SNMP poller binaries
+        run: docker compose exec -T rust cargo build --locked -p cmdb-service -p snmp-poller
+      - name: Run real JetStream, failover and CMDB acceptance
+        run: docker compose exec -T rust cargo test --locked -p scheduler-service --test integration --test acceptance -- --test-threads=1
+      - name: Cleanup isolated Scheduler environment
+        if: always()
+        run: docker compose down --volumes
