@@ -1,0 +1,9 @@
+*
+!migrations/
+!migrations/*.sql
+!tests-rs/
+!tests-rs/Cargo.toml
+!tests-rs/Cargo.lock
+!tests-rs/tests/
+!tests-rs/tests/*.rs
+!tests-rs/rustfmt.toml
