@@ -39,6 +39,11 @@ pub mod subjects {
         format!("raw.gnmi.{site}")
     }
 
+    /// Raw syslog transport envelope: `raw.syslog.<site>`.
+    pub fn syslog(site: &str) -> String {
+        format!("raw.syslog.{site}")
+    }
+
     pub const TASKS_STREAM: &str = "TASKS_SNMP";
     pub const TASKS_FILTER: &str = "tasks.snmp.>";
     pub const RAW_SNMP_STREAM: &str = "RAW_SNMP";
@@ -47,6 +52,8 @@ pub mod subjects {
     pub const RAW_TRAP_FILTER: &str = "raw.trap.>";
     pub const RAW_GNMI_STREAM: &str = "RAW_GNMI";
     pub const RAW_GNMI_FILTER: &str = "raw.gnmi.>";
+    pub const RAW_SYSLOG_STREAM: &str = "RAW_SYSLOG";
+    pub const RAW_SYSLOG_FILTER: &str = "raw.syslog.>";
     pub const KV_GNMI_DESIRED: &str = "gnmi-desired";
     pub const KV_GNMI_LEASES: &str = "gnmi-leases";
 }

@@ -1,0 +1,24 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Transport envelope only. Payload timestamps, vendor parsing and device identity
+// belong to downstream processors. Payload is never assumed to be UTF-8.
+message RawSyslogEvent {
+  string event_id = 1; // Stable across spool replay; used as Nats-Msg-Id.
+  string gateway_id = 2;
+  string site = 3;
+  google.protobuf.Timestamp received_at = 4; // Gateway clock.
+  string source_ip = 5;
+  uint32 source_port = 6;
+  SyslogTransport transport = 7;
+  bytes payload = 8; // Original message bytes, excluding TCP framing.
+  bool truncated = 9; // UDP payload exceeded the configured limit.
+}
+
+enum SyslogTransport {
+  SYSLOG_TRANSPORT_UNSPECIFIED = 0;
+  SYSLOG_TRANSPORT_UDP = 1;
+  SYSLOG_TRANSPORT_TCP = 2;
+}
