@@ -76,14 +76,17 @@ async fn upgrade_from_c1(client: &Client, directory: &Path) -> Result {
     migrations(&baseline, true)?;
     let before = tables(client).await?;
     client.query("INSERT INTO cronet.metrics (event_time, device_id, metric, value, collector_id) VALUES (now64(3), toUUID('00000000-0000-0000-0000-000000000001'), 'legacy', 42, 'C1')").execute().await?;
+    client.query("INSERT INTO cronet.logs (event_time, source_ip, facility, severity, message, collector_id) VALUES (now64(3), toIPv6('192.0.2.10'), 23, 7, 'legacy log', 'C1')").execute().await?;
     migrations(directory, true)?;
     assert_eq!(client.query("SELECT count() FROM cronet.metrics WHERE metric = 'legacy' AND value = 42 AND event_id = toUUID('00000000-0000-0000-0000-000000000000')").fetch_one::<u64>().await?, 1);
+    assert_eq!(client.query("SELECT count() FROM cronet.logs WHERE message = 'legacy log' AND source_ip = toIPv6('192.0.2.10') AND device_id IS NULL AND event_id = toUUID('00000000-0000-0000-0000-000000000000')").fetch_one::<u64>().await?, 1);
     for (old, new) in before.iter().zip(tables(client).await?.iter()) {
         assert_eq!(old.uuid, new.uuid);
         assert_eq!(old.sorting_key, new.sorting_key);
     }
     // Only the isolated fixture is emptied before the existing 10k sanity test.
     client.query("TRUNCATE TABLE cronet.metrics").execute().await?;
+    client.query("TRUNCATE TABLE cronet.logs").execute().await?;
     for file in std::fs::read_dir(&baseline)? {
         std::fs::remove_file(file?.path())?;
     }
@@ -150,6 +153,7 @@ async fn check_schema(client: &Client) -> Result {
                 ("message", "String"),
                 ("collector_id", "LowCardinality(String)"),
                 ("attributes", "Map(String, String)"),
+                ("event_id", "UUID"),
             ],
         ),
     ] {
@@ -164,7 +168,7 @@ async fn check_schema(client: &Client) -> Result {
         .query("SELECT version FROM cronet.schema_migrations FINAL WHERE applied ORDER BY version")
         .fetch_all::<String>()
         .await?;
-    assert_eq!(versions, ["20261016000100", "20261016000200", "20261016000300"]);
+    assert_eq!(versions, ["20261016000100", "20261016000200", "20261016000300", "20261016000400"]);
     Ok(())
 }
 
@@ -348,7 +352,7 @@ async fn real_clickhouse_schema() -> Result {
     migrations(&directory, true)?;
     check_schema(&client).await?;
     assert_eq!(tables(&client).await?, before, "Replay must preserve table UUIDs and DDL");
-    assert_eq!(client.query("SELECT count() FROM cronet.schema_migrations").fetch_one::<u64>().await?, 3);
+    assert_eq!(client.query("SELECT count() FROM cronet.schema_migrations").fetch_one::<u64>().await?, 4);
     for table in ["metrics", "logs"] {
         assert_eq!(client.query(&format!("SELECT count() FROM cronet.{table}")).fetch_one::<u64>().await?, ROWS as u64);
     }

@@ -44,6 +44,7 @@ pub struct StreamLimits {
     pub raw_trap: i64,
     pub raw_gnmi: i64,
     pub metrics: i64,
+    pub logs: i64,
 }
 
 impl StreamLimits {
@@ -56,6 +57,7 @@ impl StreamLimits {
             raw_trap: 2048 * Self::MB,
             raw_gnmi: 8192 * Self::MB,
             metrics: 2048 * Self::MB,
+            logs: 4096 * Self::MB,
         }
     }
 
@@ -66,6 +68,7 @@ impl StreamLimits {
             raw_trap: 64 * Self::MB,
             raw_gnmi: 128 * Self::MB,
             metrics: 128 * Self::MB,
+            logs: 128 * Self::MB,
         }
     }
 
@@ -161,6 +164,21 @@ impl Bus {
                 storage: StorageType::File,
                 num_replicas: replicas,
                 max_bytes: limits.metrics,
+                discard: DiscardPolicy::New,
+                duplicate_window: Duration::from_secs(120),
+                ..Default::default()
+            })
+            .await
+            .map_err(js_err)?;
+        // Same outage protection for normalized logs; raw stream policies above stay unchanged.
+        self.js
+            .get_or_create_stream(StreamConfig {
+                name: subjects::LOGS_STREAM.into(),
+                subjects: vec![subjects::LOGS_FILTER.into()],
+                retention: RetentionPolicy::WorkQueue,
+                storage: StorageType::File,
+                num_replicas: replicas,
+                max_bytes: limits.logs,
                 discard: DiscardPolicy::New,
                 duplicate_window: Duration::from_secs(120),
                 ..Default::default()

@@ -76,6 +76,9 @@ milliseconds; maps can use `Vec<(String, String)>`. See the test row types for a
 working example. Migration `20261016000300` adds `event_id` as a forward-only
 change: legacy rows and old writers default to zero; C2 supplies a validated
 nonzero UUID. Existing partitions, sorting keys, TTL and engine are preserved.
+Migration `20261016000400` adds the same producer identity to logs, retaining
+legacy rows and old writers with a zero UUID default. C3 requires a nonzero
+producer UUID and preserves it. No template columns are introduced.
 These MergeTree tables append rows; event identity supports downstream
 deduplication but does not itself provide exactly-once storage.
 
