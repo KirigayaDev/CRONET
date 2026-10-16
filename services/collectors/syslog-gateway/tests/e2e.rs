@@ -24,6 +24,8 @@ use tokio::{
 
 #[path = "cases/certs.rs"]
 mod certificates;
+#[path = "cases/relp.rs"]
+mod relp_cases;
 #[path = "cases/tls.rs"]
 mod tls_cases;
 

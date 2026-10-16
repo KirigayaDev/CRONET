@@ -22,6 +22,8 @@ const KEYS: &[&str] = &[
     "SYSLOG_TLS_CLIENT_CA_FILE",
     "SYSLOG_TLS_RELOAD_SECS",
     "SYSLOG_TLS_HANDSHAKE_SECS",
+    "SYSLOG_RELP_ADDR",
+    "SYSLOG_RELP_TLS_ADDR",
 ];
 
 #[derive(Clone)]
@@ -38,6 +40,8 @@ pub struct Config {
     pub udp_addr: SocketAddr,
     pub tcp_addr: SocketAddr,
     pub tls_addr: Option<SocketAddr>,
+    pub relp_addr: Option<SocketAddr>,
+    pub relp_tls_addr: Option<SocketAddr>,
     pub tls: Option<TlsSettings>,
     pub site: String,
     pub gateway_id: String,
@@ -140,7 +144,15 @@ impl Config {
             .get("SYSLOG_TLS_ADDR")
             .map(|value| value.parse().map_err(|_| invalid("SYSLOG_TLS_ADDR")))
             .transpose()?;
-        let tls = if tls_addr.is_some() {
+        let relp_addr = env
+            .get("SYSLOG_RELP_ADDR")
+            .map(|value| value.parse().map_err(|_| invalid("SYSLOG_RELP_ADDR")))
+            .transpose()?;
+        let relp_tls_addr = env
+            .get("SYSLOG_RELP_TLS_ADDR")
+            .map(|value| value.parse().map_err(|_| invalid("SYSLOG_RELP_TLS_ADDR")))
+            .transpose()?;
+        let tls = if tls_addr.is_some() || relp_tls_addr.is_some() {
             let path = |name: &str| -> Result<PathBuf> {
                 let value = env.get(name).ok_or_else(|| invalid(name))?;
                 let path = PathBuf::from(value);
@@ -169,12 +181,14 @@ impl Config {
             })
         } else {
             if KEYS.iter().filter(|name| name.starts_with("SYSLOG_TLS_")).any(|name| env.contains_key(*name)) {
-                return Err(Error::Config("TLS settings require SYSLOG_TLS_ADDR".into()));
+                return Err(Error::Config("TLS settings require SYSLOG_TLS_ADDR or SYSLOG_RELP_TLS_ADDR".into()));
             }
             None
         };
         Ok(Self {
             tls_addr,
+            relp_addr,
+            relp_tls_addr,
             tls,
             udp_addr: parse(
                 &env,
@@ -219,6 +233,8 @@ mod tests {
         assert_eq!(cfg.udp_addr.port(), 5514);
         assert!(cfg.tls_addr.is_none());
         assert!(cfg.tls.is_none());
+        assert!(cfg.relp_addr.is_none());
+        assert!(cfg.relp_tls_addr.is_none());
         for (key, value) in [
             ("NETMON_SITE", ""),
             ("NETMON_SITE", "a.b"),
@@ -247,6 +263,8 @@ mod tests {
             ("SYSLOG_TLS_ADDR", "127.0.0.1:6514"),
             ("SYSLOG_TLS_CERT_FILE", "unused.pem"),
             ("SYSLOG_TLS_RELOAD_SECS", "0"),
+            ("SYSLOG_RELP_ADDR", "invalid"),
+            ("SYSLOG_RELP_TLS_ADDR", "127.0.0.1:20515"),
         ] {
             let mut values = base.clone();
             values.insert(key.into(), value.into());

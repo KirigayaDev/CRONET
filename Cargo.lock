@@ -2724,6 +2724,7 @@ dependencies = [
  "contracts",
  "crc32fast",
  "futures",
+ "nom",
  "prost",
  "prost-types",
  "rcgen",

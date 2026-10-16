@@ -1,7 +1,7 @@
 use crate::{
     config::{Config, TlsSettings},
     error::{Error, Result},
-    tcp, Intake,
+    relp, tcp, Intake,
 };
 use arc_swap::ArcSwap;
 use contracts::netmon::v1::SyslogTransport;
@@ -32,6 +32,12 @@ struct Active {
 pub struct ReloadingTls {
     settings: TlsSettings,
     active: ArcSwap<Active>,
+}
+
+#[derive(Clone, Copy)]
+pub enum Application {
+    Syslog,
+    Relp,
 }
 
 fn read(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
@@ -145,11 +151,16 @@ pub async fn listen(
     tls: Arc<ReloadingTls>,
     intake: Intake,
     stop: CancellationToken,
+    application: Application,
 ) -> Result<()> {
     let slots = Arc::new(Semaphore::new(cfg.max_connections));
     let mut connections = JoinSet::new();
     let failed = Arc::new(AtomicU64::new(0));
     let handshake_timeout = cfg.tls.as_ref().ok_or(Error::Tls("listener settings missing"))?.handshake_timeout;
+    let transport = match application {
+        Application::Syslog => SyslogTransport::Tls,
+        Application::Relp => SyslogTransport::RelpTls,
+    };
     loop {
         let permit = tokio::select! { _ = stop.cancelled() => break, permit = slots.clone().acquire_owned() => permit.map_err(|_| Error::Task)?, };
         let (socket, peer) =
@@ -162,10 +173,13 @@ pub async fn listen(
             let mut stream = match accepted {
                 Ok(Ok(stream)) => stream,
                 _ => { let count = failed.fetch_add(1, Ordering::Relaxed).saturating_add(1);
-                    if count.is_power_of_two() { tracing::warn!(transport = "tls", source_ip = %peer.ip(), status = "tls_handshake_failed", failed_total = count, "TLS handshake rejected or timed out"); } return; }
+                    if count.is_power_of_two() { tracing::warn!(transport = transport as i32, source_ip = %peer.ip(), status = "tls_handshake_failed", failed_total = count, "TLS handshake rejected or timed out"); } return; }
             };
-            tracing::debug!(transport = "tls", source_ip = %peer.ip(), site = %cfg.site, status = "tls_handshake_ok", "TLS session established");
-            let _result = tcp::session(&mut stream, peer, cfg.clone(), intake, stop, SyslogTransport::Tls).await;
+            tracing::debug!(transport = transport as i32, source_ip = %peer.ip(), site = %cfg.site, status = "tls_handshake_ok", "TLS session established");
+            let _result = match application {
+                Application::Syslog => tcp::session(&mut stream, peer, cfg.clone(), intake, stop, transport).await,
+                Application::Relp => relp::session(&mut stream, peer, cfg.clone(), intake, stop, transport).await,
+            };
             let _shutdown = tokio::time::timeout(cfg.idle_timeout, stream.shutdown()).await;
         });
         while let Some(result) = connections.try_join_next() {

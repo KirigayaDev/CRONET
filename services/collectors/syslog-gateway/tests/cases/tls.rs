@@ -179,3 +179,35 @@ async fn slow_tls_handshake_is_bounded() {
     let _valid = connect(gateway.addr("tls_addr"), ca.client(None)).await.unwrap();
     gateway.kill().await;
 }
+
+#[tokio::test]
+#[ignore = "requires real nats-server"]
+async fn tls_outage_uses_the_same_persistent_spool_and_stable_id() {
+    let nats_port = port();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spool.redb");
+    let ca = Ca::new();
+    let leaf = ca.leaf(false);
+    let settings = ca.files(dir.path(), &leaf, false);
+    let extra = certificates::env(&settings);
+    let mut gateway = Gateway::start_with(&path, nats_port, 65536, &extra).await;
+    let mut tls = connect(gateway.addr("tls_addr"), ca.client(None)).await.unwrap();
+    tls.write_all(b"tls-offline\xff\n").await.unwrap();
+    let id = gateway.wait("spooled").await["event_id"].as_str().unwrap().to_owned();
+    gateway.kill().await;
+    {
+        let spool = Spool::open(&path, MIN_SPOOL_BYTES).unwrap();
+        let pending = spool.batch(1, false).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].event.event_id, id);
+        assert_eq!(pending[0].event.transport, SyslogTransport::Tls as i32);
+    }
+    let mut gateway = Gateway::start_with(&path, nats_port, 65536, &extra).await;
+    let mut nats = Nats::start(nats_port).await;
+    let bus = nats.bus().await;
+    assert_eq!(gateway.wait("published").await["event_id"], id);
+    assert_eq!(events(&bus, 1).await[0].payload, b"tls-offline\xff");
+    gateway.kill().await;
+    assert_eq!(Spool::open(&path, MIN_SPOOL_BYTES).unwrap().stats().unwrap().pending, 0);
+    nats.kill().await;
+}

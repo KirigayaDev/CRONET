@@ -5,6 +5,8 @@ to JetStream. No vendor parsing, RFC3164/RFC5424 timestamp interpretation,
 ClickHouse insert, CLI, NETCONF or voice processing happens here.
 Plain UDP/TCP listeners retain their B1 behavior. Optional B2 TLS adds server
 authentication or mandatory client authentication (mTLS) on a separate listener.
+Optional RELP adds application acknowledgements after durable local commit,
+over either plain TCP or TLS.
 Use TLS on untrusted networks and restrict access to plaintext endpoints.
 
 ## TLS (B2)
@@ -13,7 +15,7 @@ TLS is disabled unless `SYSLOG_TLS_ADDR` is set (typically `0.0.0.0:6514`).
 Then `SYSLOG_TLS_CERT_FILE` and `SYSLOG_TLS_KEY_FILE` are required PEM file paths.
 `SYSLOG_TLS_CLIENT_CA_FILE` enables mandatory mTLS: missing or untrusted client
 identities fail the handshake. Without a client CA, only the server authenticates.
-Cert/key/CA settings without an enabled TLS listener are configuration errors.
+Cert/key/CA settings without an enabled TLS or RELP-TLS listener are configuration errors.
 Bad paths, PEM, mismatched keys and expired/not-yet-valid certificates fail startup.
 
 TLS 1.2/1.3 use rustls with the ring provider. Certificate parsing and current
@@ -51,6 +53,56 @@ The existing Compose `syslog` profile requires no certificate mounts and remains
 compatible. Add TLS environment, read-only secret mounts and a 6514 port mapping
 in a local Compose override when TLS is needed. The production image contains no
 generated certificates or private keys.
+
+## RELP (B2)
+
+`SYSLOG_RELP_ADDR` enables plain RELP (suggested `0.0.0.0:20514`).
+`SYSLOG_RELP_TLS_ADDR` enables RELP over TLS (suggested `0.0.0.0:20515`), using
+the same certificate, mTLS, handshake timeout and hot reload settings as syslog
+TLS. Either TLS listener can be enabled independently. Both RELP listeners are
+disabled by default. Exposed Docker ports do not enable listeners or publish host
+ports; add mappings explicitly or in a local Compose override.
+
+The incremental `nom` parser implements RELP wire frames
+`TXNR SP COMMAND SP DATALEN [SP DATA] LF`, bounded decimal headers and binary
+data with no allocation based on an unchecked declared length. It supports
+fragmented input, pipelined frames and exact byte payloads. The frame limit is
+`SYSLOG_MAX_FRAME_BYTES`, including `open` offer data. A session processes one
+transaction at a time and sends responses in request order. Existing connection
+limits, frame deadline and bounded ingress also apply to RELP.
+
+Supported commands are `open`, `syslog`, `close`. `open` must be transaction 1
+and offer `relp_version` (0 or 1) plus `commands=syslog`; the response negotiates
+those capabilities. Subsequent transaction numbers increment by one, wrapping
+999999999 → 1. Unknown commands, bad sequence/state, malformed frames and
+unsupported offers close the session (with a bounded 500 response where framing
+is valid). `syslog` before `open` is rejected. `close` returns a response and
+shuts the session down orderly. STARTTLS, compression and hint commands are not
+implemented; RELP-TLS starts with a TLS handshake on its own endpoint.
+
+For every `syslog` transaction:
+
+```
+RELP frame → original payload envelope → Intake → redb Immediate commit
+           → RELP rsp "200 OK"
+           → asynchronous JetStream publish/ACK → local deletion
+```
+
+The response confirms durable **local** acceptance; NATS need not be online.
+The publisher can proceed concurrently after commit, so it may finish before the
+client receives the RELP response. A full spool withholds success and backpressures
+the connection. A failed commit closes the session without success. Retries after
+a lost RELP response may create a new event: txnr is connection-local and never
+used as a global event ID. Locally committed events retain their UUID across
+restart/replay; JetStream deduplication still uses the B1 120s window.
+
+Transport numbers are additive: `TLS=3`, `RELP=4`, `RELP_TLS=5`. Raw payloads,
+timestamps, event IDs, subjects and stream policies retain B1 semantics.
+Structured debug logs include command, txnr, source, transport and event ID;
+payload, private key and certificate bodies are never logged.
+
+Framing/offer behavior follows the [librelp protocol specification](https://sources.debian.org/data/main/libr/librelp/1.2.12-1~bpo8%2B1/doc/relp.html)
+and [librelp session implementation](https://github.com/rsyslog/librelp/blob/master/src/relpsess.c).
 
 UDP: one datagram per event; non-UTF8 and empty payloads are valid. A fixed 64 KiB
 receive buffer captures the entire IP datagram. Payload above the configured
@@ -171,3 +223,8 @@ Integration tests own their NATS processes, random localhost ports and temporary
 spools. They cover UDP/binary/truncation, multiple LF and octet-counted TCP
 messages, TCP connection/idle/frame limits, NATS outage plus SIGKILL/restart replay,
 stable IDs, ACK-before-delete deduplication and graceful SIGTERM shutdown on Unix.
+They also generate test certificates through rcgen for TLS/mTLS, failed and valid
+rotation, established-session continuity and slow handshakes; exercise RELP
+open/syslog/close, fragmented/pipelined requests, malformed frames, local durable
+ACK during NATS outage, full-spool backpressure and crash/replay; and verify RELP
+over mTLS plus TLS outage persistence. No PEM fixtures are committed.

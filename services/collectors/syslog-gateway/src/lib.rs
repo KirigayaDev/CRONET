@@ -3,6 +3,7 @@ pub mod error;
 pub mod framing;
 pub mod model;
 pub mod publisher;
+pub mod relp;
 pub mod spool;
 pub mod tcp;
 pub mod tls;
@@ -44,6 +45,10 @@ impl Intake {
         }
     }
     pub async fn tcp(&self, event: RawSyslogEvent) -> Result<()> {
+        self.durable(event).await
+    }
+    /// Completion means an Immediate redb commit, independent of JetStream.
+    pub async fn durable(&self, event: RawSyslogEvent) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(Ingress { event, committed: Some(tx) }).await.map_err(|_| Error::Task)?;
         rx.await.map_err(|_| Error::Task)
@@ -98,8 +103,8 @@ async fn writer(
                 }
                 Err(Error::Full) => {
                     if stop.is_cancelled() {
-                        tracing::warn!(transport = "tcp", source_ip = %event.source_ip, event_id = %event.event_id,
-                            status = "shutdown_before_commit", "spool full; pending TCP frame was not durably accepted");
+                        tracing::warn!(transport = event.transport, source_ip = %event.source_ip, event_id = %event.event_id,
+                            status = "shutdown_before_commit", "spool full; pending frame was not durably accepted");
                         break;
                     }
                     tokio::select! { _ = stop.cancelled() => {}, _ = tokio::time::sleep(Duration::from_millis(100)) => {} }
@@ -132,6 +137,20 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
         .map(|listener| listener.local_addr())
         .transpose()?
         .map_or_else(|| "disabled".into(), |addr| addr.to_string());
+    let relp_listener =
+        if let Some(addr) = cfg.relp_addr { Some(tokio::net::TcpListener::bind(addr).await?) } else { None };
+    let relp_tls_listener =
+        if let Some(addr) = cfg.relp_tls_addr { Some(tokio::net::TcpListener::bind(addr).await?) } else { None };
+    let relp_addr = relp_listener
+        .as_ref()
+        .map(|listener| listener.local_addr())
+        .transpose()?
+        .map_or_else(|| "disabled".into(), |addr| addr.to_string());
+    let relp_tls_addr = relp_tls_listener
+        .as_ref()
+        .map(|listener| listener.local_addr())
+        .transpose()?
+        .map_or_else(|| "disabled".into(), |addr| addr.to_string());
     let udp = udp::bind(cfg.udp_addr, cfg.udp_rcvbuf)?;
     let tcp = tokio::net::TcpListener::bind(cfg.tcp_addr).await?;
     let udp_addr = udp.local_addr()?;
@@ -144,9 +163,24 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
     let mut tasks = JoinSet::new();
     tasks.spawn(udp::listen(udp, cfg.clone(), intake.clone(), stop.clone()));
     tasks.spawn(tcp::listen(tcp, cfg.clone(), intake.clone(), stop.clone()));
-    if let (Some(listener), Some(tls)) = (tls_listener, tls_manager) {
+    if let Some(tls) = tls_manager {
         tasks.spawn(tls.clone().watch(stop.clone()));
-        tasks.spawn(tls::listen(listener, cfg.clone(), tls, intake.clone(), stop.clone()));
+        if let Some(listener) = tls_listener {
+            tasks.spawn(tls::listen(
+                listener,
+                cfg.clone(),
+                tls.clone(),
+                intake.clone(),
+                stop.clone(),
+                tls::Application::Syslog,
+            ));
+        }
+        if let Some(listener) = relp_tls_listener {
+            tasks.spawn(tls::listen(listener, cfg.clone(), tls, intake.clone(), stop.clone(), tls::Application::Relp));
+        }
+    }
+    if let Some(listener) = relp_listener {
+        tasks.spawn(relp::listen(listener, cfg.clone(), intake.clone(), stop.clone()));
     }
     tasks.spawn(publisher::run(cfg.clone(), spool.clone(), wake.clone(), publisher_stop.clone()));
     // Move rx to a separate task; pass drops separately to avoid a sender cycle.
@@ -156,7 +190,7 @@ pub async fn run(cfg: Config, stop: CancellationToken) -> Result<()> {
     let writer_wake = wake.clone();
     let writer_handle = tokio::spawn(writer(rx, writer_spool, drops, writer_wake, writer_stop));
     drop(intake);
-    tracing::info!(site = %cfg.site, gateway_id = %cfg.gateway_id, %udp_addr, %tcp_addr, %tls_addr,
+    tracing::info!(site = %cfg.site, gateway_id = %cfg.gateway_id, %udp_addr, %tcp_addr, %tls_addr, %relp_addr, %relp_tls_addr,
         spool_depth = stats.pending, spool_bytes = stats.used_bytes, quarantined = stats.quarantined,
         status = "ready", "syslog listeners ready");
 

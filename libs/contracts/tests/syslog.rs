@@ -11,6 +11,8 @@ fn syslog_contract_preserves_bytes_and_metadata() {
     assert_eq!(SyslogTransport::Udp as i32, 1);
     assert_eq!(SyslogTransport::Tcp as i32, 2);
     assert_eq!(SyslogTransport::Tls as i32, 3);
+    assert_eq!(SyslogTransport::Relp as i32, 4);
+    assert_eq!(SyslogTransport::RelpTls as i32, 5);
     let event = RawSyslogEvent {
         event_id: "stable-id".into(),
         gateway_id: "gateway-1".into(),

@@ -23,4 +23,10 @@
 **/*.log
 **/*.key
 **/*.pem
+**/*.crt
+**/*.der
+**/*.p12
+**/*.pfx
+**/certs/**
+**/secrets/**
 **/crypt_keys/**

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   syslog-integration:
-    name: UDP, TCP, durable replay and deduplication
+    name: Syslog UDP, TCP, TLS, mTLS, RELP and durable replay
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -28,7 +28,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/nats-server"
           echo "NATS_SERVER=$RUNNER_TEMP/nats-server" >> "$GITHUB_ENV"
       - run: cargo test -p syslog-gateway --locked
-      - name: Real sockets, NATS outage, process restart and duplicate window
+      - name: Real sockets, TLS rotation, RELP durable ACK, outage and replay
         run: cargo test -p syslog-gateway --test e2e --locked -- --ignored --test-threads=1
       - name: Build production image
         run: docker build -f services/collectors/syslog-gateway/Dockerfile -t cronet/syslog-gateway:ci .
@@ -40,5 +40,5 @@ jobs:
             test "$(stat -c %a /var/lib/cronet/syslog)" = 700 &&
             test -z "$(ls -A /var/lib/cronet/syslog)" &&
             test ! -d /build && test ! -d /workspace && test ! -d /app &&
-            test -z "$(find / -name Cargo.toml -o -name Cargo.lock -o -name syslog.proto 2>/dev/null)"
+            test -z "$(find / -name Cargo.toml -o -name Cargo.lock -o -name syslog.proto -o -name server.key -o -name server.pem -o -name fixtures -o -name reports -o -name .env 2>/dev/null)"
           '
