@@ -22,7 +22,7 @@ async fn core() -> (PgPool, Service) {
     let name: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&pool).await.unwrap();
     assert_eq!(name, "cronet_cmdb_test_schema", "Refusing a non-test database");
     let head: String = sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_one(&pool).await.unwrap();
-    assert_eq!(head, "8b6e2f4a9c10", "Apply the existing CMDB Alembic chain first");
+    assert_eq!(head, "d4c1a2b3e001", "Apply the CMDB Alembic chain first");
     (pool.clone(), Service::new(pool))
 }
 

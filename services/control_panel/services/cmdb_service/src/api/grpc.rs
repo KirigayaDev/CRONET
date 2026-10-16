@@ -98,6 +98,58 @@ fn parsed_patch<T: std::str::FromStr>(value: Option<pb::StringPatch>, field: &st
 
 #[tonic::async_trait]
 impl pb::cmdb_server::Cmdb for GrpcApi {
+    async fn submit_inventory_snapshot(
+        &self,
+        mut request: Request<pb::SubmitInventorySnapshotRequest>,
+    ) -> Result<Response<pb::SubmitInventorySnapshotResponse>, Status> {
+        let principal = self.authorize(&mut request, true).await?;
+        let service = self.state.service.for_mutation(mutation_context(principal, &request));
+        let v = request.into_inner();
+        let time = v.collected_at.ok_or_else(|| Status::invalid_argument("collected_at is required"))?;
+        if !(0..1_000_000_000).contains(&time.nanos) {
+            return Err(Status::invalid_argument("Invalid timestamp nanos"));
+        }
+        let collected_at = chrono::DateTime::from_timestamp(time.seconds, time.nanos as u32)
+            .filter(|t| (-62135596800..=253402300799).contains(&t.timestamp()))
+            .ok_or_else(|| Status::invalid_argument("Invalid collected_at"))?;
+        let result = service
+            .submit_inventory(
+                uuid(&v.device_id)?,
+                crate::inventory::SubmitInventory {
+                    collected_at,
+                    components: v.components.into_iter().map(Into::into).collect(),
+                },
+            )
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(pb::SubmitInventorySnapshotResponse {
+            snapshot: Some(result.snapshot.into()),
+            unchanged: result.unchanged,
+        }))
+    }
+    async fn get_latest_inventory(
+        &self,
+        mut request: Request<pb::IdRequest>,
+    ) -> Result<Response<pb::InventorySnapshot>, Status> {
+        self.authorize(&mut request, false).await?;
+        let snapshot =
+            self.state.service.latest_inventory(uuid(&request.into_inner().id)?).await.map_err(domain_status)?;
+        Ok(Response::new(snapshot.into()))
+    }
+    async fn compare_inventory_snapshots(
+        &self,
+        mut request: Request<pb::CompareInventorySnapshotsRequest>,
+    ) -> Result<Response<pb::InventoryDiff>, Status> {
+        self.authorize(&mut request, false).await?;
+        let v = request.into_inner();
+        let diff = self
+            .state
+            .service
+            .compare_inventory(uuid(&v.device_id)?, uuid(&v.previous_id)?, uuid(&v.current_id)?)
+            .await
+            .map_err(domain_status)?;
+        Ok(Response::new(diff.into()))
+    }
     async fn get_device(&self, mut request: Request<pb::IdRequest>) -> Result<Response<pb::Device>, Status> {
         let _principal = self.authorize(&mut request, false).await?;
         let id = uuid(&request.into_inner().id)?;

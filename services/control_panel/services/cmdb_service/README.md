@@ -4,12 +4,72 @@ Root workspace member on `feature/d1-cmdb-api`. Stage 4 adds transactional
 audit, manual field ownership and staged CSV device import to the existing
 HTTP/Axum and gRPC/tonic APIs. Both transports share one Service and Authenticator.
 
-The existing Alembic head is `8b6e2f4a9c10`. This package never creates tables,
+The Alembic head is `d4c1a2b3e001` (D4), following D1 `8b6e2f4a9c10`. This package never creates tables,
 changes schema, reads .env files, or runs migrations itself. Apply the existing
 Alembic chain before startup. The existing audit/override/import tables are
 reused without a new migration. Stage 5 integrates the canonical layout, shared
 contracts, Docker/Compose and isolated CI. Discovery, Scheduler and service-account
 identities remain separate work.
+
+## Physical inventory (D4)
+
+CMDB accepts normalized ENTITY-MIB components; it does not collect SNMP data.
+Apply the forward Alembic migration before starting the binary. The migration
+adds `inventory_snapshots` and `inventory_components`; existing D1 migrations
+and tables are unchanged. The component primary key `(snapshot_id,
+ent_physical_index)` also provides the required snapshot lookup index.
+
+Authenticated HTTP routes under `/api/v1/cmdb`:
+
+| Method | Path | Access |
+| --- | --- | --- |
+| POST | `/devices/{device_id}/inventory` | admin / superadmin |
+| GET | `/devices/{device_id}/inventory` | authenticated reader |
+| GET | `/devices/{device_id}/inventory/diff?previous_id=UUID&current_id=UUID` | authenticated reader |
+| GET | `/devices/{device_id}/inventory/export?format=csv` (or `xlsx`) | authenticated reader |
+
+Additive gRPC methods are `SubmitInventorySnapshot`, `GetLatestInventory`
+(`IdRequest.id` is the device UUID), and `CompareInventorySnapshots`.
+POST accepts `collected_at` (RFC3339, years 0001..9999) and `components`.
+Each component contains `ent_physical_index`, `class`, optional `contained_in`,
+`parent_rel_pos`, `name`, `description`, `vendor_type`, `serial`, `model`,
+`hardware_rev`, `firmware_rev`, `software_rev`. Unknown fields are rejected.
+
+Limits: 10,000 components; positive unique indices; nonnegative containment
+(zero means root); positions >= -1 (-1 means unknown); no self-containment.
+Class is nonblank, trimmed, ASCII lowercase, at most 64 bytes. Optional strings
+are trimmed, blank becomes null, case is preserved; maximum 255 characters
+(description: 1024); NUL is rejected. Sparse/partial containment is accepted.
+Both transports allow bounded inventory messages up to 192 MiB.
+
+Canonical components are sorted by index and serialized in fixed field order
+before BLAKE3. Collection time is excluded. A device row lock serializes
+latest-content comparison and the single UNNEST insert transaction, including
+metadata-only audit. Identical latest content returns the original snapshot
+and `unchanged=true`, with no new audit event. Latest means greatest
+`collected_at`, then `created_at` and UUID; late observations remain history
+and do not replace newer observations. No global historical hash deduplication
+is applied. An empty snapshot records removal of all components.
+
+Diff first matches unique `(class, serial)` identities, so a move/slot swap is
+CHANGED. Remaining components match unique `(contained_in, parent_rel_pos,
+class)` slots when the parent is positive and the position known; otherwise
+`(index, class)` is used. Both nonblank serials differing in a matched slot
+mean REPLACED. Ambiguous slots never imply replacement; compatible identical
+indices can still match, otherwise components remain ADDED/REMOVED. Changes
+include old/new values, changed field names, and a unified text diff (`similar`).
+Both snapshot IDs must belong to the requested device.
+
+CSV and XLSX are generated in memory; CPU work runs outside async workers.
+CSV quotes multiline fields and prefixes spreadsheet formula-like text with
+an apostrophe. XLSX writes explicit string cells, preserving serial zeros.
+No export, key, fixture, test, or report is added to the production image.
+
+Dependency note: published `rust_xlsxwriter 0.99.1` requires ZIP 8.x, whose
+available versions are currently yanked. `Cargo.lock` retains ZIP 8.6.0 and its
+checksum from that published crate's own lockfile; use `--locked` builds.
+ZIP 9 is used only to independently read/validate XLSX exports in tests.
+Existing locked dependency versions have not been upgraded.
 
 ## Structure
 

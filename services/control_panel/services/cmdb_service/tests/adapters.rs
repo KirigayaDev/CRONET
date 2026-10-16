@@ -215,7 +215,7 @@ async fn test_pool() -> PgPool {
     let name: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&pool).await.unwrap();
     assert_eq!(name, "cronet_cmdb_test_schema");
     let head: String = sqlx::query_scalar("SELECT version_num FROM alembic_version").fetch_one(&pool).await.unwrap();
-    assert_eq!(head, "8b6e2f4a9c10");
+    assert_eq!(head, "d4c1a2b3e001");
     pool
 }
 fn redis_url() -> String {
@@ -688,7 +688,7 @@ async fn openapi_documents_all_operations_security_and_patch_schemas() {
             }
         }
     }
-    assert_eq!(operations, 45);
+    assert_eq!(operations, 49);
     assert_eq!(spec["components"]["securitySchemes"]["bearer_jwt"]["scheme"], "bearer");
     assert!(spec["components"]["schemas"]["UpdateDeviceDto"].is_object());
     assert!(spec["paths"]["/api/v1/cmdb/devices"]["get"]["parameters"]
@@ -1045,3 +1045,6 @@ mod workflow_tests;
 
 #[path = "support/integration_tests.rs"]
 mod integration_tests;
+
+#[path = "support/inventory_tests.rs"]
+mod inventory_tests;

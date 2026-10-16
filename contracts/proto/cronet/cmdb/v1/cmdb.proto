@@ -17,6 +17,34 @@ service Cmdb {
   rpc CreateIpAddress(CreateIpAddressRequest) returns (IpAddress);
   rpc UpdateIpAddress(UpdateIpAddressRequest) returns (IpAddress);
   rpc GetRack(IdRequest) returns (Rack);
+  rpc SubmitInventorySnapshot(SubmitInventorySnapshotRequest) returns (SubmitInventorySnapshotResponse);
+  rpc GetLatestInventory(IdRequest) returns (InventorySnapshot);
+  rpc CompareInventorySnapshots(CompareInventorySnapshotsRequest) returns (InventoryDiff);
+}
+
+message InventoryComponent {
+ int32 ent_physical_index = 1; optional int32 contained_in = 2; optional int32 parent_rel_pos = 3;
+ string class = 4; optional string name = 5; optional string description = 6;
+ optional string vendor_type = 7; optional string serial = 8; optional string model = 9;
+ optional string hardware_rev = 10; optional string firmware_rev = 11; optional string software_rev = 12;
+}
+message InventorySnapshot {
+ string id = 1; string device_id = 2; google.protobuf.Timestamp collected_at = 3;
+ string content_hash = 4; int32 component_count = 5; google.protobuf.Timestamp created_at = 6;
+ repeated InventoryComponent components = 7;
+}
+message SubmitInventorySnapshotRequest {
+ string device_id = 1; google.protobuf.Timestamp collected_at = 2; repeated InventoryComponent components = 3;
+}
+message SubmitInventorySnapshotResponse { InventorySnapshot snapshot = 1; bool unchanged = 2; }
+message CompareInventorySnapshotsRequest { string device_id = 1; string previous_id = 2; string current_id = 3; }
+message InventoryComponentChange {
+ InventoryComponent old = 1; InventoryComponent new = 2; repeated string changed_fields = 3; string text_diff = 4;
+}
+message InventoryDiff {
+ repeated InventoryComponent added = 1; repeated InventoryComponent removed = 2;
+ repeated InventoryComponentChange changed = 3; repeated InventoryComponentChange replaced = 4;
+ repeated InventoryComponent unchanged = 5;
 }
 
 enum LifecycleStatus { LIFECYCLE_STATUS_UNSPECIFIED = 0; ACTIVE = 1; MAINTENANCE = 2; DECOMMISSIONED = 3; }

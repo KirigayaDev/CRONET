@@ -15,7 +15,7 @@ pub async fn check_connection(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-/// Check the relations used by D1, without tying runtime health to an Alembic head.
+/// Check required CMDB relations, without tying runtime health to an Alembic head.
 pub async fn schema_ready(pool: &PgPool) -> Result<bool> {
     const TABLES: &[&str] = &[
         "sites",
@@ -28,6 +28,8 @@ pub async fn schema_ready(pool: &PgPool) -> Result<bool> {
         "audit_events",
         "import_batches",
         "import_rows",
+        "inventory_snapshots",
+        "inventory_components",
     ];
     Ok(sqlx::query_scalar(
         "SELECT bool_and(EXISTS (

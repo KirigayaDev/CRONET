@@ -147,6 +147,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/ip-addresses", post(create_ip_address))
         .route("/ip-addresses/{id}", get(get_ip_address).patch(update_ip_address).delete(delete_ip_address))
         .merge(super::workflow::routes())
+        .merge(super::inventory::routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     Router::new()
         .nest("/api/v1/cmdb", protected)
@@ -621,5 +622,5 @@ impl utoipa::Modify for Security {
     }
 }
 #[derive(OpenApi)]
-#[openapi(paths(live,ready,openapi,list_sites,get_site,create_site,update_site,delete_site,list_rooms,get_room,create_room,update_room,delete_room,list_racks,get_rack,create_rack,update_rack,delete_rack,list_devices,get_device,create_device,update_device,list_interfaces,get_interface,create_interface,update_interface,delete_interface,list_ip_addresses,get_ip_address,create_ip_address,update_ip_address,delete_ip_address,decommission_device),components(schemas(ErrorBody,HealthBody,ApiLifecycle,SiteDto,CreateSiteDto,UpdateSiteDto,RoomDto,CreateRoomDto,UpdateRoomDto,RackDto,CreateRackDto,UpdateRackDto,DeviceDto,CreateDeviceDto,UpdateDeviceDto,InterfaceDto,CreateInterfaceDto,UpdateInterfaceDto,IpAddressDto,CreateIpAddressDto,UpdateIpAddressDto)),nest((path="/api/v1/cmdb",api=super::workflow::WorkflowDoc)),modifiers(&Security))]
+#[openapi(paths(live,ready,openapi,list_sites,get_site,create_site,update_site,delete_site,list_rooms,get_room,create_room,update_room,delete_room,list_racks,get_rack,create_rack,update_rack,delete_rack,list_devices,get_device,create_device,update_device,list_interfaces,get_interface,create_interface,update_interface,delete_interface,list_ip_addresses,get_ip_address,create_ip_address,update_ip_address,delete_ip_address,decommission_device),components(schemas(ErrorBody,HealthBody,ApiLifecycle,SiteDto,CreateSiteDto,UpdateSiteDto,RoomDto,CreateRoomDto,UpdateRoomDto,RackDto,CreateRackDto,UpdateRackDto,DeviceDto,CreateDeviceDto,UpdateDeviceDto,InterfaceDto,CreateInterfaceDto,UpdateInterfaceDto,IpAddressDto,CreateIpAddressDto,UpdateIpAddressDto)),nest((path="/api/v1/cmdb",api=super::workflow::WorkflowDoc),(path="/api/v1/cmdb",api=super::inventory::InventoryDoc)),modifiers(&Security))]
 pub struct ApiDoc;

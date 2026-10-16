@@ -12,7 +12,9 @@ import psycopg2
 
 
 PREVIOUS_HEAD = '72ca3097da29'
-CMDB_HEAD = '8b6e2f4a9c10'
+D1_HEAD = '8b6e2f4a9c10'
+CMDB_HEAD = 'd4c1a2b3e001'
+INVENTORY_TABLES = {'inventory_snapshots', 'inventory_components'}
 TABLES = {
     'sites', 'rooms', 'racks', 'devices', 'interfaces', 'ip_addresses',
     'field_overrides', 'audit_events', 'import_batches', 'import_rows',
@@ -95,7 +97,7 @@ class CmdbMigrationTests(unittest.TestCase):
             if alembic('heads') != f'{CMDB_HEAD} (head)':
                 raise AssertionError('Expected exactly one CMDB migration head')
             history = alembic('history')
-            if f'{PREVIOUS_HEAD} -> {CMDB_HEAD}' not in history:
+            if f'{PREVIOUS_HEAD} -> {D1_HEAD}' not in history or f'{D1_HEAD} -> {CMDB_HEAD}' not in history:
                 raise AssertionError('CMDB must extend the existing migration chain')
             print(f'\nMigration chain: {history}', flush=True)
             alembic('upgrade', PREVIOUS_HEAD)
@@ -170,7 +172,7 @@ class CmdbMigrationTests(unittest.TestCase):
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public'
             """)
-            self.assertEqual({row[0] for row in cursor}, TABLES | {'users', 'alembic_version'})
+            self.assertEqual({row[0] for row in cursor}, TABLES | INVENTORY_TABLES | {'users', 'alembic_version'})
             cursor.execute("""
                 SELECT table_name, column_name, udt_name FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = ANY(%s)
@@ -575,15 +577,69 @@ class CmdbMigrationTests(unittest.TestCase):
                 self.connection.rollback()
                 self.connection.set_session(isolation_level='READ COMMITTED')
 
+    def inventory(self):
+        return scalar(self.connection, """
+            INSERT INTO inventory_snapshots(device_id,collected_at,content_hash,component_count)
+            VALUES (%s,now(),%s,1) RETURNING id
+        """, (self.device(), 'a' * 64))
+
+    def test_inventory_components_primary_key_and_foreign_keys(self):
+        snapshot = self.inventory()
+        sql = "INSERT INTO inventory_components(snapshot_id,ent_physical_index,class) VALUES (%s,%s,'module')"
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, (snapshot, 1))
+        self.reject(sql, (snapshot, 1), '23505')
+        self.reject(sql, (str(uuid4()), 1), '23503')
+        self.reject("INSERT INTO inventory_snapshots(device_id,collected_at,content_hash,component_count) VALUES (%s,now(),%s,0)",
+                    (str(uuid4()), 'a' * 64), '23503')
+
+    def test_inventory_index_and_string_bounds(self):
+        snapshot = self.inventory()
+        for index in (0, -1):
+            self.reject("INSERT INTO inventory_components(snapshot_id,ent_physical_index,class) VALUES (%s,%s,'module')", (snapshot, index))
+        for column, value in [('contained_in', -1), ('contained_in', 1), ('parent_rel_pos', -2), ('name', 'x'*256), ('description', 'x'*1025), ('class', '')]:
+            columns = 'snapshot_id,ent_physical_index,class' if column == 'class' else f'snapshot_id,ent_physical_index,class,{column}'
+            placeholders = '%s,1,%s' if column == 'class' else "%s,1,'module',%s"
+            self.reject(f'INSERT INTO inventory_components({columns}) VALUES ({placeholders})', (snapshot, value))
+        with self.connection.cursor() as cursor:
+            cursor.execute("INSERT INTO inventory_components(snapshot_id,ent_physical_index,class,contained_in,parent_rel_pos) VALUES (%s,1,'chassis',0,-1)", (snapshot,))
+
+    def test_inventory_hash_count_and_timestamp_constraints(self):
+        device = self.device()
+        for hash_value, count in [('bad', 1), ('a'*64, -1), ('a'*64, 10001)]:
+            self.reject("INSERT INTO inventory_snapshots(device_id,collected_at,content_hash,component_count) VALUES (%s,now(),%s,%s)", (device, hash_value, count))
+        self.reject("INSERT INTO inventory_snapshots(device_id,collected_at,content_hash,component_count) VALUES (%s,'infinity',%s,0)", (device, 'a'*64))
+
+    def test_inventory_indexes_and_snapshot_cascade(self):
+        snapshot = self.inventory()
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT indexdef FROM pg_indexes WHERE tablename='inventory_snapshots'")
+            self.assertTrue(any('(device_id, collected_at DESC, created_at DESC, id DESC)' in row[0] for row in cursor))
+            cursor.execute("SELECT indexdef FROM pg_indexes WHERE tablename='inventory_components'")
+            self.assertTrue(any('(snapshot_id, ent_physical_index)' in row[0] for row in cursor))
+            cursor.execute("INSERT INTO inventory_components(snapshot_id,ent_physical_index,class) VALUES (%s,1,'fan')", (snapshot,))
+            cursor.execute('DELETE FROM inventory_snapshots WHERE id=%s', (snapshot,))
+        self.assertEqual(scalar(self.connection, 'SELECT count(*) FROM inventory_components WHERE snapshot_id=%s', (snapshot,)), 0)
+
+    def test_inventory_forward_downgrade_preserves_d1(self):
+        before = fingerprint(self.connection, TABLES | {'users'})
+        self.connection.rollback()
+        alembic('downgrade', D1_HEAD)
+        self.assertEqual(fingerprint(self.connection, TABLES | {'users'}), before)
+        self.assertEqual(scalar(self.connection, "SELECT count(*) FROM information_schema.tables WHERE table_name=ANY(%s)", (list(INVENTORY_TABLES),)), 0)
+        self.connection.rollback()
+        alembic('upgrade', 'head')
+        self.assertEqual(fingerprint(self.connection, TABLES | {'users'}), before)
+
     def test_zzz_downgrade_upgrade_restores_schema_and_preserves_users(self):
-        before = fingerprint(self.connection, TABLES)
+        before = fingerprint(self.connection, TABLES | INVENTORY_TABLES)
         self.connection.rollback()
         alembic('downgrade', PREVIOUS_HEAD)
         self.assertEqual(scalar(self.connection, 'SELECT version_num FROM alembic_version'), PREVIOUS_HEAD)
         self.assertEqual(scalar(self.connection, """
             SELECT count(*) FROM information_schema.tables
             WHERE table_schema = 'public' AND table_name = ANY(%s)
-        """, (list(TABLES),)), 0)
+        """, (list(TABLES | INVENTORY_TABLES),)), 0)
         self.assertEqual(scalar(self.connection, """
             SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'public' AND p.proname LIKE 'cmdb_%%'
@@ -594,7 +650,7 @@ class CmdbMigrationTests(unittest.TestCase):
                                (self.user_id,)), self.user_data)
         self.connection.rollback()
         alembic('upgrade', 'head')
-        self.assertEqual(fingerprint(self.connection, TABLES), before)
+        self.assertEqual(fingerprint(self.connection, TABLES | INVENTORY_TABLES), before)
         self.assertEqual(scalar(self.connection, 'SELECT version_num FROM alembic_version'), CMDB_HEAD)
         print('\nUpgrade/downgrade/upgrade and users preservation: OK', flush=True)
 

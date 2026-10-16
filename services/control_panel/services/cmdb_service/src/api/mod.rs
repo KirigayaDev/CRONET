@@ -1,6 +1,7 @@
 pub mod dto;
 pub mod grpc;
 pub mod http;
+pub mod inventory;
 pub mod workflow;
 
 #[derive(Clone)]
@@ -22,7 +23,11 @@ pub async fn serve(
         .with_graceful_shutdown(wait_shutdown(http_stop))
         .into_future();
     let grpc = tonic::transport::Server::builder()
-        .add_service(grpc::pb::cmdb_server::CmdbServer::new(grpc::GrpcApi::new(state)))
+        .add_service(
+            grpc::pb::cmdb_server::CmdbServer::new(grpc::GrpcApi::new(state))
+                .max_decoding_message_size(crate::inventory::MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(crate::inventory::MAX_MESSAGE_BYTES),
+        )
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::TcpListenerStream::new(grpc_listener),
             wait_shutdown(receiver),

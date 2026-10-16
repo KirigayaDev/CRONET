@@ -5,6 +5,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod imports;
+pub mod inventory;
 pub mod models;
 pub mod repository;
 pub mod service;
