@@ -28,7 +28,8 @@ Use a dedicated migration account with CREATE DATABASE/TABLE privileges; batcher
 need only their table's INSERT permission (readers SELECT). Keep credentials out
 of SQL, command lines, and Git. Use a secure connection for remote deployments.
 
-Migrations `20261016000100` (metrics) and `20261016000200` (logs) each contain
+Migrations `20261016000100` (metrics), `20261016000200` (logs), and
+`20261016000300` (metric event UUID) each contain
 one idempotent DDL statement with `transaction:false`: ClickHouse DDL is not
 transactional. `schema_migrations` records completed versions. Repeating `up`
 does nothing; `IF NOT EXISTS` permits recovery if DDL succeeded before its version
@@ -46,7 +47,7 @@ Both tables use `MergeTree`, daily `toYYYYMMDD(event_time)` partitions, UTC
 
 | Table | Columns after the two timestamps | Sorting key / main query |
 | --- | --- | --- |
-| `metrics` | `device_id UUID`, `interface_id Nullable(UUID)`, `metric LowCardinality(String)`, `value Float64`, `collector_id LowCardinality(String)`, `labels Map(String,String)` | `(device_id, metric, event_time)`; one device + metric + half-open time range |
+| `metrics` | `device_id UUID`, `interface_id Nullable(UUID)`, `metric LowCardinality(String)`, `value Float64`, `collector_id LowCardinality(String)`, `labels Map(String,String)`, `event_id UUID` | `(device_id, metric, event_time)`; one device + metric + half-open time range |
 | `logs` | `device_id Nullable(UUID)`, `source_ip IPv6`, `hostname LowCardinality(String)`, `facility UInt8`, `severity UInt8`, `app_name LowCardinality(String)`, `message String`, `collector_id LowCardinality(String)`, `attributes Map(String,String)` | `(device_id, event_time)`; device + time range, then severity/host/source filters |
 
 **Shared retention policy: 30 days from event time for both tables.** Each DDL
@@ -72,8 +73,11 @@ C2/C3 should use explicit column lists and `clickhouse::Client::insert` or
 `Inserter` with RowBinary, accumulate rows, then await `end`/`commit`. UUIDs use
 `clickhouse::serde::uuid` (and `uuid::option`); `DateTime64(3)` can use signed Unix
 milliseconds; maps can use `Vec<(String, String)>`. See the test row types for a
-working example. These MergeTree tables append rows; retry deduplication belongs
-to the future writer contract, and is not provided by C1.
+working example. Migration `20261016000300` adds `event_id` as a forward-only
+change: legacy rows and old writers default to zero; C2 supplies a validated
+nonzero UUID. Existing partitions, sorting keys, TTL and engine are preserved.
+These MergeTree tables append rows; event identity supports downstream
+deduplication but does not itself provide exactly-once storage.
 
 ## Real-server integration tests
 
@@ -95,7 +99,7 @@ docker compose -p cronet-c1-local -f services/storage/clickhouse/tests/compose.y
 ```
 
 The runner requires an empty `cronet` database namespace, applies migrations,
-checks all columns/types, engines, partition/sorting keys and production TTL
+checks upgrade from populated C1 tables, all columns/types, engines, partition/sorting keys and production TTL
 metadata, writes **10,000 metrics + 10,000 logs in 1,000-row batches**, reads every
 field back, and checks device/metric/time, severity, hostname/source, NULL UUID,
 IPv4 and IPv6 queries. It then verifies replay preserves DDL, table UUIDs,

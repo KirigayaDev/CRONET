@@ -1,0 +1,18 @@
+syntax = "proto3";
+package netmon.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Normalized by C4/future producers; this is not a raw collector payload.
+// Publish on metrics.<site>, using event_id as Nats-Msg-Id on retries.
+message MetricPoint {
+  string event_id = 1;
+  google.protobuf.Timestamp event_time = 2;
+  string device_id = 3;
+  optional string interface_id = 4;
+  string metric = 5;
+  double value = 6;
+  string collector_id = 7;
+  map<string, string> labels = 8;
+  string site = 9;
+}
