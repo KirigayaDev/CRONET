@@ -1,0 +1,32 @@
+[package]
+name = "syslog-gateway"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = "0.46.0"
+bus = { version = "0.1.0", path = "../../../libs/bus" }
+bytes = "1.12.1"
+contracts = { version = "0.1.0", path = "../../../libs/contracts" }
+crc32fast = "1.5.0"
+futures = "0.3.34"
+prost = "0.14.4"
+prost-types = "0.14.4"
+redb = "=2.6.3"
+socket2 = "0.6.5"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "io-util"] }
+tokio-util = { version = "0.7.20", features = ["codec", "rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+uuid = { version = "1.26.1", features = ["v4"] }
+
+[dev-dependencies]
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+tokio = { version = "1.53.2", features = ["process"] }

@@ -9,6 +9,7 @@ members = [
     "services/collectors/snmp-poller",
     "services/collectors/trap-receiver",
     "services/collectors/gnmi-telemetry",
+    "services/collectors/syslog-gateway",
 ]
 
 [workspace.package]
