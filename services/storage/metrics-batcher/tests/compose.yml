@@ -1,0 +1,43 @@
+services:
+  nats:
+    image: nats:2.11
+    command: ["-js", "-sd", "/data"]
+    tmpfs: [/data]
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8.33.6-distroless
+    environment:
+      CLICKHOUSE_USER: metrics_test
+      CLICKHOUSE_PASSWORD: synthetic-metrics-test-only
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    tmpfs:
+      - /var/lib/clickhouse:uid=101,gid=101,mode=0750
+      - /var/log/clickhouse-server:uid=101,gid=101,mode=0750
+    healthcheck:
+      test: ["CMD", "/usr/bin/clickhouse", "client", "--user", "metrics_test", "--password", "synthetic-metrics-test-only", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+  integration:
+    build:
+      context: ../../../..
+      dockerfile: services/storage/metrics-batcher/tests/Dockerfile
+    environment:
+      METRICS_E2E: "1"
+      NATS_URL: nats://nats:4222
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: metrics_test
+      CLICKHOUSE_PASSWORD: synthetic-metrics-test-only
+      DATABASE_URL: clickhouse://metrics_test:synthetic-metrics-test-only@clickhouse:9000/cronet
+    volumes:
+      - ../../../..:/workspace:ro
+      - target:/target
+      - registry:/usr/local/cargo/registry
+    depends_on:
+      clickhouse: {condition: service_healthy}
+      nats: {condition: service_started}
+volumes:
+  target:
+  registry:

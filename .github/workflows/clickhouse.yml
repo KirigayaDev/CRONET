@@ -2,7 +2,7 @@ name: ClickHouse schema integration
 
 on:
   push:
-    branches: ["main", "master", "develop", "feature/c1-clickhouse-ddl"]
+    branches: ["main", "master", "develop", "feature/c1-clickhouse-ddl", "feature/c2-metrics-batcher"]
   pull_request:
     branches: ["main", "master", "develop"]
   workflow_dispatch:
