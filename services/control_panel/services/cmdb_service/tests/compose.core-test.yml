@@ -1,0 +1,61 @@
+# Independent test project: no control_panel/.env, published ports or DB bind mounts.
+services:
+  redis:
+    image: redis:8.2.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_DB: cronet_cmdb_test_schema
+      POSTGRES_HOST_AUTH_METHOD: trust
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "cmdb_test", "-d", "cronet_cmdb_test_schema"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  database_migrations:
+    build:
+      context: ../../database_migrations
+    environment:
+      POSTGRES_USER: cmdb_test
+      POSTGRES_PASSWORD: ""
+      POSTGRES_DB: cronet_cmdb_test_schema
+      PYTHONDONTWRITEBYTECODE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  rust:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: ["sleep", "infinity"]
+    environment:
+      CARGO_TARGET_DIR: /build
+      CMDB_TEST_DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
+      DATABASE_URL: postgresql://cmdb_test@postgres/cronet_cmdb_test_schema?sslmode=disable
+      CMDB_TEST_REDIS_URL: redis://redis:6379
+    volumes:
+      - ../../../../..:/workspace:ro
+      - cargo_registry:/usr/local/cargo/registry
+      - cargo_target:/build
+    depends_on:
+      database_migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  cargo_registry:
+  cargo_target:

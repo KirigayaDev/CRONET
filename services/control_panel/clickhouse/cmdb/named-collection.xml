@@ -1,0 +1,12 @@
+<clickhouse>
+    <named_collections>
+        <cronet_cmdb_postgres>
+            <host from_env="CMDB_DICTIONARY_PG_HOST" overridable="false"/>
+            <port from_env="CMDB_DICTIONARY_PG_PORT" overridable="false"/>
+            <db from_env="CMDB_DICTIONARY_PG_DATABASE" overridable="false"/>
+            <schema from_env="CMDB_DICTIONARY_PG_SCHEMA" overridable="false"/>
+            <user from_env="CMDB_DICTIONARY_PG_USER" overridable="false"/>
+            <password from_env="CMDB_DICTIONARY_PG_PASSWORD" overridable="false"/>
+        </cronet_cmdb_postgres>
+    </named_collections>
+</clickhouse>

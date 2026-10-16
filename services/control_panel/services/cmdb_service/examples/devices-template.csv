@@ -1,0 +1,3 @@
+site,room,rack,start_unit,height_u,hostname,device_type,vendor,model,serial,lifecycle_status
+Site A,Room A,Rack A,1,1,router-01,router,Example Vendor,Example Model,example-serial-01,active
+,,,,2,unplaced-01,server,,,,maintenance
